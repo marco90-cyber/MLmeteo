@@ -87,6 +87,16 @@ fun SettingsScreen() {
             Divider()
             SettingRow("Qualità dell'aria", "Copernicus CAMS", Icons.Filled.Air)
             Divider()
+            ChoiceRow(
+                "Ore della mappa ICON-2I", Icons.Filled.AccessTime,
+                listOf(
+                    Choice("6", "Prossime 6 ore", "Circa 8 MB per strato."),
+                    Choice("12", "Prossime 12 ore", "Circa 15 MB per strato."),
+                    Choice("24", "Tutta la corsa (fino a 24 ore)", "Circa 25 MB per strato."),
+                ),
+                s.icon2iHours.toString(),
+            ) { v -> AppState.update { it.copy(icon2iHours = v.toInt()) } }
+            Divider()
             SettingRow("Chiavi API", "OpenWeatherMap, WeatherAPI, AccuWeather…", Icons.Filled.Key, onClick = { Nav.go(Screen.API_KEYS) })
         }
 

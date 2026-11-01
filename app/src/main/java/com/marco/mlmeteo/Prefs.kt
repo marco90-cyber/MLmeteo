@@ -31,7 +31,9 @@ enum class HomeItem(val id: String, val title: String, val locked: Boolean = fal
 data class Settings(
     val sourceId: String = "ecmwf",
     val radarId: String = "auto",
-    val radarModel: String = "icon_seamless",
+    val radarModel: String = "icon2i",
+    val icon2iHours: Int = 12,
+    val showLightning: Boolean = false,
     val useWallpaper: Boolean = true,
     val manualColor: Long = 0xFFA9A6FF,
     val mode: String = "auto",
@@ -74,8 +76,10 @@ object Prefs {
             sourceId = p.getString("sourceId", d.sourceId) ?: d.sourceId,
             radarId = p.getString("radarId", d.radarId) ?: d.radarId,
             radarModel = (p.getString("radarModel", d.radarModel) ?: d.radarModel).let {
-                if (it == "icon_seamless" || it == "ecmwf_ifs025") it else d.radarModel
+                if (it == "icon2i" || it == "icon_seamless" || it == "ecmwf_ifs025") it else d.radarModel
             },
+            icon2iHours = p.getInt("icon2iHours", d.icon2iHours),
+            showLightning = p.getBoolean("showLightning", d.showLightning),
             useWallpaper = p.getBoolean("useWallpaper", d.useWallpaper),
             manualColor = p.getLong("manualColor", d.manualColor),
             mode = p.getString("mode", d.mode) ?: d.mode,
@@ -104,6 +108,8 @@ object Prefs {
             .putString("sourceId", s.sourceId)
             .putString("radarId", s.radarId)
             .putString("radarModel", s.radarModel)
+            .putInt("icon2iHours", s.icon2iHours)
+            .putBoolean("showLightning", s.showLightning)
             .putBoolean("useWallpaper", s.useWallpaper)
             .putLong("manualColor", s.manualColor)
             .putString("mode", s.mode)

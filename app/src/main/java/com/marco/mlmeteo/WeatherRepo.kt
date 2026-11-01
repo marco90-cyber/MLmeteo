@@ -360,7 +360,7 @@ object WeatherRepo {
         val lons = (0 until n).map { west + (east - west) * it / (n - 1) }
         val la = ArrayList<String>(); val lo = ArrayList<String>()
         for (y in lats) for (x in lons) { la += String.format(Locale.US, "%.3f", y); lo += String.format(Locale.US, "%.3f", x) }
-        val vars = listOf("precipitation", "temperature_2m", "cloud_cover", "wind_speed_10m")
+        val vars = listOf("precipitation", "temperature_2m", "cloud_cover", "wind_speed_10m", "wind_gusts_10m", "snowfall")
         val url = "https://api.open-meteo.com/v1/forecast?latitude=${la.joinToString(",")}&longitude=${lo.joinToString(",")}" +
             "&hourly=${vars.joinToString(",")}&forecast_days=3&timezone=auto&models=$model"
         val body = Net.get(url, 30000)

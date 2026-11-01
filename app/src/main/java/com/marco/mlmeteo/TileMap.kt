@@ -77,6 +77,8 @@ object Tiles {
     var version by mutableIntStateOf(0)
         private set
 
+    fun clearFailed() = failed.clear()
+
     fun get(url: String): ImageBitmap? {
         cache.get(url)?.let { return it }
         if (url in failed || !pending.add(url)) return null

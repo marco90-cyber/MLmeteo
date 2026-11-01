@@ -50,6 +50,7 @@ object AppState {
         if (inited) return
         inited = true
         app = ctx.applicationContext
+        Icon2i.cacheDir = app.cacheDir
         settings = Prefs.loadSettings(app)
         savedPlaces = Prefs.loadPlaces(app)
         gpsPlace = Prefs.loadGps(app)
