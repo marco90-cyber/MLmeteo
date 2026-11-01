@@ -216,7 +216,7 @@ object AppState {
             val list = Geocoder(app, Locale.ITALY).getFromLocation(lat, lon, 1)
             val a = list?.firstOrNull()
             val n = a?.locality ?: a?.subAdminArea
-            if (n == null) null else Triple(n, a.adminArea ?: "", a.countryCode?.lowercase() ?: "")
+            if (n == null) null else Triple(n, a?.adminArea ?: "", a?.countryCode?.lowercase() ?: "")
         }
     } catch (e: Exception) { null }
 }

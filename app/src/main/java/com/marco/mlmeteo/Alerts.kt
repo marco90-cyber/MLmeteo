@@ -127,7 +127,13 @@ object AlertsRepo {
         val out = ArrayList<Alert>()
         for ((date, zones) in dpcZones) {
             if (date.isBefore(LocalDate.now(zone))) continue
-            val z = zones.firstOrNull { key in it.comuni } ?: continue
+            val matches = zones.filter { key in it.comuni }
+            if (matches.isEmpty()) continue
+            // un comune può stare in più zone: si prende il livello più alto
+            val z = DpcZone(
+                matches.joinToString(" / ") { it.name }, emptySet(),
+                matches.maxOf { it.idraulico }, matches.maxOf { it.temporali }, matches.maxOf { it.idrogeologico },
+            )
             val start = date.atStartOfDay(zone)
             val end = date.plusDays(1).atStartOfDay(zone)
             fun add(kind: String, lv: Int) {
