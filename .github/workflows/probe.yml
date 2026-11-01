@@ -9,21 +9,31 @@ jobs:
       - name: Modelli
         run: |
           sudo apt-get install -y -qq libeccodes-tools > /dev/null 2>&1
-          F=$(curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/t_2m/ | grep -o 'href="[^"]*regular-lat-lon[^"]*_006_[^"]*"' | head -1 | cut -d'"' -f2)
-          curl -sSL -o e.bz2 "https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/t_2m/$F"; bunzip2 -f e.bz2
-          echo "== ICON-EU t2m"; python3 .github/aec_test.py e
-          F=$(curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/tot_prec/ | grep -o 'href="[^"]*regular-lat-lon[^"]*_006_[^"]*"' | head -1 | cut -d'"' -f2)
-          curl -sSL -o p.bz2 "https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/tot_prec/$F"; bunzip2 -f p.bz2
-          echo "== ICON-EU tp"; python3 .github/aec_test.py p
-          D=$(date -u +%Y%m%d)
+          which kotlinc && kotlinc -version 2>&1 | tail -1
+          kotlinc app/src/main/java/com/marco/mlmeteo/Grib.kt .github/kt/Test.kt -include-runtime -d t.jar 2>&1 | grep -v warning | head -20
+          chk() { grib_get_data -w count=1 "$1" 2>/dev/null | awk 'NR>1 && NR%997==0' > "$1.txt"; java -jar t.jar "$1" "$1.txt"; }
+          dwd() { F=$(curl -sSL "$1" | grep -o "href=\"[^\"]*$2[^\"]*\"" | head -1 | cut -d'"' -f2); echo "file $F"; curl -sSL -o "$3.bz2" "$1$F"; bunzip2 -f "$3.bz2"; }
+          echo "== ICON-EU t2m"; dwd https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/t_2m/ "regular-lat-lon_single-level_[0-9]*_006_" e; chk e
+          echo "== ICON-EU dirs"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/ | grep -o 'href="[^"]*/"' | tr '\n' ' '
+          echo; echo "== ICON-EU t 850"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/t/ | grep -o 'href="[^"]*_006_850[^"]*"' | head -2
+          echo "== ICON-EU snowlmt"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/snowlmt/ | grep -o 'href="[^"]*_006_[^"]*"' | head -2
+          echo "== ICON-EU tot_prec steps"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/tot_prec/ | grep -o '_[0-9][0-9][0-9]_TOT' | tr '\n' ' '
+          echo; echo "== ICON-EU 15 run"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/15/tot_prec/ | grep -o '_[0-9][0-9][0-9]_TOT' | tail -3 | tr '\n' ' '
+          echo; echo "== ICON-D2 dirs"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/ | grep -o 'href="[^"]*/"' | tr '\n' ' '
+          echo; echo "== ICON-D2 t2m"; dwd https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/t_2m/ "regular-lat-lon_single-level_[0-9]*_006_" d; chk d
+          echo "== ICON-D2 t files"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/t/ | grep -o 'href="[^"]*regular[^"]*_006_[^"]*"' | head -3
+          echo "== ICON-D2 dbz"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/dbz_cmax/ | grep -o 'href="[^"]*regular[^"]*_006_[^"]*"' | head -2
+          echo "== ICON-D2 steps"; curl -sSL https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/t_2m/ | grep -o 'regular-lat-lon_single-level_[0-9]*_[0-9]*_' | sed 's/.*_\([0-9]*\)_$/\1/' | tail -3 | tr '\n' ' '
+          echo; D=$(date -u +%Y%m%d)
           I="https://data.ecmwf.int/forecasts/$D/00z/ifs/0p25/oper/${D}000000-6h-oper-fc.index"
-          echo "== ECMWF index"; curl -sS "$I" | head -2
-          curl -sS "$I" | python3 -c "import json,sys;print(sorted(set(json.loads(l)['param'] for l in sys.stdin if l.strip())))" || true
-          O=$(curl -sS "$I" | grep '"param": "2t"' | head -1 | python3 -c "import json,sys;d=json.loads(sys.stdin.read());print(d['_offset'],d['_length'])") || true
-          set -- $O
-          if [ -n "$1" ]; then curl -sS -r $1-$(($1+$2-1)) -o x.grib "https://data.ecmwf.int/forecasts/$D/00z/ifs/0p25/oper/${D}000000-6h-oper-fc.grib2"
-            grib_ls -p shortName,packingType,gridType,Ni,Nj,bitsPerValue x.grib | sed -n 2p
-            grib_dump -O x.grib | grep -E "latitudeOfFirst|longitudeOfFirst|scanningMode" | head -3
-            python3 .github/aec_test.py x.grib || true; fi
-          echo "== ECMWF steps"; curl -sS "https://data.ecmwf.int/forecasts/$D/00z/ifs/0p25/oper/" | grep -o '[0-9]*h-oper-fc.grib2' | sort -u | head -80 | tr '\n' ' '
-          echo; echo "== MOLOCH vars precip"; curl -sSL https://meteohub.agenziaitaliameteo.it/nwp/MOLOCH_AIM/ | grep -o 'href="[0-9]*/"' | tail -1
+          echo "== ECMWF pl 850"; curl -sS "$I" | grep '"levelist": "850"' | head -8
+          echo "== ECMWF sfc"; curl -sS "$I" | grep -E '"param": "(msl|mucape|lcc|sd|sf|tp|10fg)"' | head -8
+          O=$(curl -sS "$I" | grep '"param": "msl"' | head -1 | python3 -c "import json,sys;d=json.loads(sys.stdin.read());print(d['_offset'],d['_length'])")
+          set -- $O; curl -sS -r $1-$(($1+$2-1)) -o x.grib "https://data.ecmwf.int/forecasts/$D/00z/ifs/0p25/oper/${D}000000-6h-oper-fc.grib2"
+          echo "== ECMWF msl"; chk x.grib
+          echo "== GFS prmsl"; curl -sS -o g.grib "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25_1hr.pl?dir=%2Fgfs.$D%2F00%2Fatmos&file=gfs.t00z.pgrb2.0p25.f006&var_PRMSL=on&var_CAPE=on&var_HGT=on&lev_mean_sea_level=on&lev_surface=on&lev_0C_isotherm=on&subregion=&toplat=55&leftlon=-15&rightlon=40&bottomlat=30"; grib_ls -p shortName,typeOfLevel g.grib; chk g.grib
+          curl -sS -o g2.grib "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25_1hr.pl?dir=%2Fgfs.$D%2F00%2Fatmos&file=gfs.t00z.pgrb2.0p25.f006&var_TMP=on&var_LCDC=on&var_MCDC=on&var_HCDC=on&var_SNOD=on&lev_850_mb=on&lev_low_cloud_layer=on&lev_middle_cloud_layer=on&lev_high_cloud_layer=on&lev_surface=on&subregion=&toplat=55&leftlon=-15&rightlon=40&bottomlat=30"; grib_ls -p shortName,typeOfLevel,packingType g2.grib
+          for M in ICON_2I_RUC WRF ICON_2I; do R=$(curl -sSL https://meteohub.agenziaitaliameteo.it/nwp/$M/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2)
+            echo "== $M $R"; curl -sSL "https://meteohub.agenziaitaliameteo.it/nwp/$M/$R" | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | tr '\n' ' '; echo; done
+          R=$(curl -sSL https://meteohub.agenziaitaliameteo.it/nwp/ICON_2I_RUC/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2)
+          for V in PMSL HZEROCL SNOWLMT CLCL H_SNOW CAPE_ML T_850; do N=$(curl -sSL "https://meteohub.agenziaitaliameteo.it/nwp/ICON_2I_RUC/$R$V/" | grep -o 'href="[^"]*grib"' | head -1 | cut -d'"' -f2); echo "$V -> $N"; done
