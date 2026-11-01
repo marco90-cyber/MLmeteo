@@ -7,8 +7,15 @@ jobs:
     steps:
       - name: Elenco file
         run: |
-          curl -sSL "https://meteohub.agenziaitaliameteo.it/nwp/" | sed 's/<[^>]*>/ /g' | tr -s ' ' | head -60
-          echo ----
-          curl -sSL "https://meteohub.agenziaitaliameteo.it/nwp/ICON-2I_SURFACE_PRESSURE_LEVELS/" | sed 's/<[^>]*>/ /g' | tr -s ' ' | head -60
-          echo ----
-          curl -sSI "https://meteohub.agenziaitaliameteo.it/nwp/" | head -20
+          B=https://meteohub.agenziaitaliameteo.it/nwp
+          L() { curl -sSL "$1" | sed 's/<[^>]*>/ /g' | tr -s ' ' | grep -v '^ *$' | head -${2:-40}; }
+          curl -sSL $B/ICON-2I_SURFACE_PRESSURE_LEVELS/ICON_2I_shortname_parameter_index.txt
+          echo "---- run 00"
+          L $B/ICON-2I_SURFACE_PRESSURE_LEVELS/2026110100/ 60
+          echo "---- RUC"
+          L $B/ICON_2I_RUC/ 30
+          R=$(curl -sSL $B/ICON_2I_RUC/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2)
+          echo "ultimo RUC $R"
+          L $B/ICON_2I_RUC/$R 60
+          S=$(curl -sSL $B/ICON_2I_RUC/$R | grep -o 'href="[^"]*/"' | grep -v '\.\.' | head -3)
+          echo "sub: $S"
