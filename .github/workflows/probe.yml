@@ -5,39 +5,16 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Prova API
+      - uses: actions/checkout@v4
+      - name: Prova decodifica
         run: |
-          set -x
-          curl -sS "https://radar-api.protezionecivile.it/findLastProductByType?type=SRI" | tee last.json
-          echo
-          curl -sS "https://radar-api.protezionecivile.it/findLastProductByType?type=VMI" | tee lastv.json
-          echo
-          T=$(python3 -c "import json;print(json.load(open('last.json'))['lastProducts'][0]['time'])")
-          curl -sS -X POST "https://radar-api.protezionecivile.it/downloadProduct" -H "content-type: application/json" \
-            -d "{\"productType\":\"SRI\",\"productDate\":$T}" | tee dl.json
-          echo
-          U=$(python3 -c "import json;print(json.load(open('dl.json'))['url'])")
+          T=$(curl -sS "https://radar-api.protezionecivile.it/findLastProductByType?type=SRI" | python3 -c "import json,sys;print(json.load(sys.stdin)['lastProducts'][0]['time'])")
+          U=$(curl -sS -X POST "https://radar-api.protezionecivile.it/downloadProduct" -H "content-type: application/json" -d "{\"productType\":\"SRI\",\"productDate\":$T}" | python3 -c "import json,sys;print(json.load(sys.stdin)['url'])")
           curl -sS -o sri.tif "$U"
-          ls -la sri.tif; file sri.tif; xxd sri.tif | head -5
-          sudo apt-get install -y -qq gdal-bin > /dev/null
-          gdalinfo -stats sri.tif | head -80
-          python3 - <<'PY'
-          import struct
-          f=open('sri.tif','rb').read()
-          bo='<' if f[:2]==b'II' else '>'
-          off=struct.unpack(bo+'I',f[4:8])[0]
-          n=struct.unpack(bo+'H',f[off:off+2])[0]
-          types={1:1,2:1,3:2,4:4,5:8,11:4,12:8,16:8}
-          for i in range(n):
-              e=f[off+2+i*12:off+14+i*12]
-              tag,typ,cnt=struct.unpack(bo+'HHI',e[:8])
-              print('tag',tag,'type',typ,'count',cnt,'val',e[8:12].hex())
-          PY
-          # tempo precedente (5 min prima) per capire la storia disponibile
-          P=$((T-3600000))
-          curl -sS -X POST "https://radar-api.protezionecivile.it/downloadProduct" -H "content-type: application/json" \
-            -d "{\"productType\":\"SRI\",\"productDate\":$P}"
-          echo
-          P=$((T-86400000))
-          curl -sS -X POST "https://radar-api.protezionecivile.it/downloadProduct" -H "content-type: application/json" \
-            -d "{\"productType\":\"SRI\",\"productDate\":$P}"
+          sudo apt-get install -y -qq gdal-bin python3-numpy > /dev/null
+          gdal_translate -q -of ENVI sri.tif ref.raw
+          printf "12.5 42\n7.6 45.07\n15.08 37.5\n18.1 40.35\n9.19 45.46\n" > pts_in.txt
+          P=$(gdalsrsinfo -o proj4 sri.tif | tr -d "'")
+          echo "$P"
+          gdaltransform -s_srs EPSG:4326 -t_srs "$P" < pts_in.txt > pts_out.txt
+          python3 .github/test_dpc.py
