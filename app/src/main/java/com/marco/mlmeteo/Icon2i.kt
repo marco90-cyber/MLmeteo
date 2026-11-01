@@ -209,6 +209,7 @@ object Icon2i {
             MapLayer.CLOUD -> listOf("CLCT")
             MapLayer.SNOW -> listOf("SNOW_GSP", "SNOW_CON")
             MapLayer.LPI -> listOf("LPI")
+            MapLayer.VIS -> throw IOException("Nebbia non disponibile con ICON-2I")
         }
         val accumulated = layer == MapLayer.RAIN || layer == MapLayer.SNOW
         val runList = withContext(Dispatchers.IO) { runs() }
