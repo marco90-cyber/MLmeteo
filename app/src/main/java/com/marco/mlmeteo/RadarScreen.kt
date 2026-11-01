@@ -242,7 +242,7 @@ val MapModels = listOf(
     "icon2i" to "ICON-2I 2 km",
     "wrf" to "WRF 1,5 km",
     "icon_seamless" to "ICON",
-    "ecmwf_ifs025" to "ECMWF",
+    "gfs_seamless" to "GFS",
 )
 
 // ------------------------------------------------------------------ schermata Radar
@@ -354,7 +354,7 @@ fun RadarScreen() {
         return i2Images.get(k) ?: d.render(k, layer)?.also { i2Images.put(k, it) }
     }
 
-    // ICON / ECMWF (Open-Meteo): la griglia segue la zona visibile
+    // ICON / GFS (Open-Meteo): la griglia segue la zona visibile
     var grid by remember { mutableStateOf<WeatherRepo.Grid?>(null) }
     var gridModel by remember { mutableStateOf("") }
     var gridBounds by remember { mutableStateOf(doubleArrayOf()) }
@@ -609,7 +609,7 @@ fun RadarScreen() {
                             else -> ""
                         }
                         val covers = place == null || (if (model == "wrf") Wrf.contains(place.lat, place.lon) else Icon2i.contains(place.lat, place.lon))
-                        if (!covers && !i2Loading) label = "Questo modello copre solo l'Italia: scegli ICON o ECMWF"
+                        if (!covers && !i2Loading) label = "Questo modello copre solo l'Italia: scegli ICON o GFS"
                     }
                     mode == RadarMode.MODEL -> {
                         val g = grid
