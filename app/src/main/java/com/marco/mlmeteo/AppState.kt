@@ -135,7 +135,9 @@ object AppState {
                 gpsPlace?.let { refreshIfOld(it) }
                 return@launch
             }
-            val name = withContext(Dispatchers.IO) { cityName(loc.latitude, loc.longitude) } ?: "Posizione attuale"
+            val name = withContext(Dispatchers.IO) {
+                cityName(loc.latitude, loc.longitude) ?: reverseName(loc.latitude, loc.longitude)
+            } ?: gpsPlace?.name?.takeIf { it != "Posizione attuale" } ?: "Posizione attuale"
             val p = Place("gps", name, "Posizione attuale", loc.latitude, loc.longitude, gps = true)
             val moved = gpsPlace?.let { roughKm(it, p) > 2.0 } ?: true
             gpsPlace = p

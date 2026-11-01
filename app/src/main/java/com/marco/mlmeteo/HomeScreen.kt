@@ -408,7 +408,7 @@ private fun RadarPreviewCard(place: Place) {
 private fun Small(title: String, content: @Composable () -> Unit) {
     val c = LocalAppColors.current
     Column(
-        Modifier.fillMaxWidth().height(136.dp).clip(RoundedCornerShape(24.dp)).background(c.card).padding(16.dp),
+        Modifier.fillMaxWidth().height(152.dp).clip(RoundedCornerShape(24.dp)).background(c.card).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(title, color = c.inkDim, fontSize = 13.sp)

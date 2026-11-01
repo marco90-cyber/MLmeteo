@@ -142,7 +142,7 @@ fun RadarScreen() {
     // In Automatico si può passare da "Osservato" a "Previsione"
     var autoForecast by remember { mutableStateOf(false) }
     val showForecast = radar == RadarSource.MLMAP || (radar == RadarSource.AUTO && autoForecast)
-    val state = remember { MapState(place?.lat ?: 42.0, place?.lon ?: 12.5, 6.5) }
+    val state = remember { MapState(place?.lat ?: 42.0, place?.lon ?: 12.5, 6.0) }
     var playing by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
 
@@ -166,7 +166,7 @@ fun RadarScreen() {
         gridError = null
         val lat = state.lat; val lon = state.lon
         try {
-            grid = WeatherRepo.grid(lat - 4.5, lat + 4.5, lon - 6.5, lon + 6.5, 13, s.radarModel)
+            grid = WeatherRepo.grid(lat - 5.5, lat + 5.5, lon - 8.0, lon + 8.0, 15, s.radarModel)
             gridCenter = Offset(lat.toFloat(), lon.toFloat())
             val now = (place?.let { AppState.forecasts[it.id]?.localNow })
             hour = grid?.times?.indexOfFirst { now != null && !it.isBefore(now.withMinute(0).withSecond(0).withNano(0)) }?.coerceAtLeast(0) ?: 0
@@ -213,8 +213,8 @@ fun RadarScreen() {
             if (showForecast && g != null && img != null) {
                 val stepLat = (g.lats.last() - g.lats.first()) / (g.lats.size - 1)
                 val stepLon = (g.lons.last() - g.lons.first()) / (g.lons.size - 1)
-                val tl = project(g.lats.last() + stepLat / 2, g.lons.first() - stepLon / 2)
-                val br = project(g.lats.first() - stepLat / 2, g.lons.last() + stepLon / 2)
+                val tl = project(g.lats.last() + stepLat / 20, g.lons.first() - stepLon / 20)
+                val br = project(g.lats.first() - stepLat / 20, g.lons.last() + stepLon / 20)
                 drawImage(
                     img, IntOffset.Zero, IntSize(img.width, img.height),
                     IntOffset(tl.x.roundToInt(), tl.y.roundToInt()),
@@ -316,7 +316,6 @@ fun RadarScreen() {
                             value = index.coerceIn(0, count - 1).toFloat(),
                             onValueChange = { v -> playing = false; if (showForecast) hour = v.roundToInt() else frame = v.roundToInt() },
                             valueRange = 0f..(count - 1).toFloat(),
-                            steps = (count - 2).coerceAtLeast(0),
                         )
                     } else if (gridLoading) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -325,7 +324,7 @@ fun RadarScreen() {
             }
             Legend(if (showForecast) layer else MapLayer.RAIN, showForecast)
             Text(
-                "© OpenStreetMap © CARTO · " + if (showForecast) "Dati Open-Meteo" else "Rain Viewer",
+                "© OpenStreetMap contributors · " + if (showForecast) "Dati Open-Meteo" else "Rain Viewer",
                 color = c.inkDim, fontSize = 10.sp,
             )
         }
@@ -365,19 +364,39 @@ private fun Legend(layer: MapLayer, forecast: Boolean) {
     }
 }
 
-/** Disegna la griglia come piccola immagine: verrà ingrandita e sfumata sulla mappa. */
+/**
+ * Disegna la griglia come immagine: i valori vengono interpolati (bilineare)
+ * su una griglia 10 volte più fitta, così le zone di pioggia hanno bordi morbidi.
+ */
 private fun gridBitmap(g: WeatherRepo.Grid, layer: MapLayer, hour: Int): ImageBitmap? {
     val vals = g.values[layer.key] ?: return null
     val ny = g.lats.size
     val nx = g.lons.size
-    if (vals.size < nx * ny) return null
-    val bmp = Bitmap.createBitmap(nx, ny, Bitmap.Config.ARGB_8888)
+    if (vals.size < nx * ny || nx < 2 || ny < 2) return null
+    fun v(xi: Int, yi: Int): Double = vals[yi * nx + xi].getOrNull(hour) ?: Double.NaN
+    val f = 10
+    val w = (nx - 1) * f + 1
+    val h = (ny - 1) * f + 1
+    val pixels = IntArray(w * h)
     val stops = layer.stops
-    for (yi in 0 until ny) for (xi in 0 until nx) {
-        val arr = vals[yi * nx + xi]
-        val v = arr.getOrNull(hour) ?: Double.NaN
-        val col = if (v.isNaN()) Color.Transparent else scale(v, stops)
-        bmp.setPixel(xi, ny - 1 - yi, col.toArgb())
+    for (py in 0 until h) {
+        val gy = py.toDouble() / f
+        val y0 = gy.toInt().coerceAtMost(ny - 2)
+        val ty = gy - y0
+        for (px in 0 until w) {
+            val gx = px.toDouble() / f
+            val x0 = gx.toInt().coerceAtMost(nx - 2)
+            val tx = gx - x0
+            val a = v(x0, y0); val b = v(x0 + 1, y0); val c = v(x0, y0 + 1); val d = v(x0 + 1, y0 + 1)
+            val value = if (a.isNaN() || b.isNaN() || c.isNaN() || d.isNaN()) {
+                listOf(a, b, c, d).filter { !it.isNaN() }.let { l -> if (l.isEmpty()) Double.NaN else l.average() }
+            } else {
+                (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty
+            }
+            // la riga 0 dell'immagine è a nord
+            pixels[(h - 1 - py) * w + px] = if (value.isNaN()) 0 else scale(value, stops).toArgb()
+        }
     }
+    val bmp = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
     return bmp.asImageBitmap()
 }

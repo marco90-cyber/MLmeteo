@@ -438,7 +438,7 @@ fun InfoScreen() {
                     "YR.no: MET Norway (api.met.no, CC BY 4.0).\n" +
                     "Qualità dell'aria: Copernicus Atmosphere Monitoring Service (via Open-Meteo).\n" +
                     "Radar: Rain Viewer (rainviewer.com).\n" +
-                    "Mappe: © OpenStreetMap contributors © CARTO.\n" +
+                    "Mappe: © OpenStreetMap contributors (openstreetmap.org/copyright).\n" +
                     "Ricerca località: Open-Meteo Geocoding (GeoNames).",
                 color = LocalAppColors.current.inkDim, fontSize = 13.sp,
             )

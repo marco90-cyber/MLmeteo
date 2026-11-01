@@ -13,6 +13,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -78,7 +80,14 @@ object Tiles {
     }
 }
 
-class TileLayer(val maxZoom: Int, val alpha: Float = 1f, val url: (z: Int, x: Int, y: Int) -> String)
+class TileLayer(
+    val maxZoom: Int,
+    val alpha: Float = 1f,
+    /** Livelli di dettaglio in più rispetto allo zoom (tessere più nitide sugli schermi densi). */
+    val zoomBoost: Int = 0,
+    val colorFilter: ColorFilter? = null,
+    val url: (z: Int, x: Int, y: Int) -> String,
+)
 
 /**
  * Mappa a tessere con pan e zoom.
@@ -110,7 +119,7 @@ fun TileMap(
         val left = cx - size.width / 2
         val top = cy - size.height / 2
         for (layer in layers) {
-            val lz = floor(state.zoom).toInt().coerceIn(1, layer.maxZoom)
+            val lz = (floor(state.zoom).toInt() + layer.zoomBoost).coerceIn(1, layer.maxZoom)
             val n = 1 shl lz
             val ts = world / n
             val x0 = floor(left / ts).toInt()
@@ -130,6 +139,7 @@ fun TileMap(
                     dstOffset = IntOffset(dx.roundToInt(), dy.roundToInt()),
                     dstSize = IntSize(sz, sz),
                     alpha = layer.alpha,
+                    colorFilter = layer.colorFilter,
                     filterQuality = FilterQuality.Low,
                 )
             }
@@ -145,10 +155,23 @@ fun TileMap(
     }
 }
 
-/** Indirizzo delle tessere di base (CARTO, chiaro o scuro). */
-fun baseLayer(dark: Boolean) = TileLayer(18) { z, x, y ->
-    val sub = "abcd"[(x + y) % 4]
-    "https://$sub.basemaps.cartocdn.com/${if (dark) "dark_all" else "light_all"}/$z/$x/$y@2x.png"
+/**
+ * Mappa di base OpenStreetMap (gratis, con User-Agent dell'app).
+ * In tema scuro i colori vengono invertiti e scuriti.
+ */
+private val darkMapFilter = ColorFilter.colorMatrix(
+    ColorMatrix(
+        floatArrayOf(
+            -0.22f, -0.43f, -0.085f, 0f, 205f,
+            -0.22f, -0.43f, -0.085f, 0f, 207f,
+            -0.22f, -0.43f, -0.085f, 0f, 218f,
+            0f, 0f, 0f, 1f, 0f,
+        )
+    )
+)
+
+fun baseLayer(dark: Boolean) = TileLayer(19, zoomBoost = 1, colorFilter = if (dark) darkMapFilter else null) { z, x, y ->
+    "https://tile.openstreetmap.org/$z/$x/$y.png"
 }
 
 fun exp2(x: Double) = exp(x * ln(2.0))

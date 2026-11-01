@@ -150,11 +150,30 @@ object WeatherRepo {
             )
         }
         if (hours.isEmpty() || days.isEmpty()) throw IOException("Nessun dato per questa zona")
-        val fixed = current.copy(
+        var fixed = current.copy(
             visibility = if (current.visibility.ok()) current.visibility else visFallback,
             uv = if (current.uv.ok()) current.uv else uvFallback,
         )
-        return Parsed(Forecast(fixed, hours, days, label, System.currentTimeMillis(), now), off)
+        var fixedDays: List<Day> = days
+        // Alcuni modelli (es. ECMWF) non danno UV o visibilità: li prendo dalla combinazione automatica di Open-Meteo
+        if (model.isNotBlank() && (!fixed.uv.ok() || !fixed.visibility.ok() || days.any { !it.uvMax.ok() })) {
+            try {
+                val e = JSONObject(Net.get(
+                    "https://api.open-meteo.com/v1/forecast?latitude=${fmt(place.lat)}&longitude=${fmt(place.lon)}" +
+                        "&current=uv_index,visibility&daily=uv_index_max&timezone=auto&forecast_days=16"
+                ))
+                val ec = e.getJSONObject("current")
+                fixed = fixed.copy(
+                    uv = if (fixed.uv.ok()) fixed.uv else ec.d("uv_index"),
+                    visibility = if (fixed.visibility.ok()) fixed.visibility else ec.d("visibility"),
+                )
+                val ed = e.getJSONObject("daily")
+                val et = ed.getJSONArray("time")
+                val uvByDate = (0 until et.length()).associate { LocalDate.parse(et.getString(it)) to (ed.optJSONArray("uv_index_max")?.d(it) ?: Double.NaN) }
+                fixedDays = days.map { d -> if (d.uvMax.ok()) d else d.copy(uvMax = uvByDate[d.date] ?: Double.NaN) }
+            } catch (ex: Exception) { }
+        }
+        return Parsed(Forecast(fixed, hours, fixedDays, label, System.currentTimeMillis(), now), off)
     }
 
     /** MET Norway (YR.no): temperatura, cielo, vento e pioggia da api.met.no; alba, UV e visibilità da Open-Meteo. */
@@ -362,6 +381,18 @@ object WeatherRepo {
         Grid(lats, lons, times, values)
     }
 }
+
+/** Nome della località dalle coordinate (OpenStreetMap Nominatim), se il telefono non ha il geocoder. */
+fun reverseName(lat: Double, lon: Double): String? = try {
+    val o = JSONObject(Net.get(
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=it" +
+            "&lat=${String.format(Locale.US, "%.4f", lat)}&lon=${String.format(Locale.US, "%.4f", lon)}"
+    ))
+    val a = o.optJSONObject("address")
+    listOf("city", "town", "village", "municipality", "county").firstNotNullOfOrNull { k ->
+        a?.optString(k)?.takeIf { it.isNotBlank() }
+    } ?: o.optString("name").takeIf { it.isNotBlank() }
+} catch (e: Exception) { null }
 
 /** Distanza approssimata in km (per riconoscere la stessa località). */
 fun roughKm(a: Place, b: Place): Double = abs(a.lat - b.lat) * 111 + abs(a.lon - b.lon) * 80
