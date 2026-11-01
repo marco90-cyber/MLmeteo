@@ -5,17 +5,17 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Elenco file
+      - name: File precipitazione
         run: |
           B=https://meteohub.agenziaitaliameteo.it/nwp
-          L() { curl -sSL "$1" | sed 's/<[^>]*>/ /g' | tr -s ' ' | grep -v '^ *$' | head -${2:-40}; }
-          curl -sSL $B/ICON-2I_SURFACE_PRESSURE_LEVELS/ICON_2I_shortname_parameter_index.txt
-          echo "---- run 00"
-          L $B/ICON-2I_SURFACE_PRESSURE_LEVELS/2026110100/ 60
-          echo "---- RUC"
-          L $B/ICON_2I_RUC/ 30
           R=$(curl -sSL $B/ICON_2I_RUC/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2)
-          echo "ultimo RUC $R"
-          L $B/ICON_2I_RUC/$R 60
-          S=$(curl -sSL $B/ICON_2I_RUC/$R | grep -o 'href="[^"]*/"' | grep -v '\.\.' | head -3)
-          echo "sub: $S"
+          echo "RUC $R"
+          curl -sSL $B/ICON_2I_RUC/${R}TOT_PREC/ | sed 's/<[^>]*>/ /g' | tr -s ' ' | grep -v '^ *$' | head -40
+          F=$(curl -sSL $B/ICON_2I_RUC/${R}TOT_PREC/ | grep -o 'href="[^"]*"' | grep -v '\.\./' | sed -n 3p | cut -d'"' -f2)
+          echo "file $F"
+          curl -sSL -o p.grib "$B/ICON_2I_RUC/${R}TOT_PREC/$F"; ls -la p.grib; file p.grib
+          sudo apt-get install -y -qq libeccodes-tools gdal-bin > /dev/null
+          grib_ls -p shortName,stepRange,packingType,gridType,Ni,Nj,numberOfValues,bitsPerValue p.grib | head
+          grib_dump -O p.grib | grep -iE "packing|gridType|latitudeOfFirst|longitudeOfFirst|latitudeOfLast|longitudeOfLast|iDirection|jDirection|Ni |Nj |scanning|southPole|angleOfRotation|bitsPerValue|referenceValue|binaryScale|decimalScale|numberOfValues|bitmap|template" | head -40
+          echo "---- run 00 TOT_PREC"
+          curl -sSL $B/ICON-2I_SURFACE_PRESSURE_LEVELS/2026110100/TOT_PREC/ | sed 's/<[^>]*>/ /g' | tr -s ' ' | grep -v '^ *$' | head -12
