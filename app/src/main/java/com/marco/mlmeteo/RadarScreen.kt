@@ -34,7 +34,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -133,94 +136,189 @@ fun RadarPreview(place: Place) {
 
 // ------------------------------------------------------------------ schermata Radar
 
+/** Frame del radar della Protezione Civile (scaricati una volta, validi 5 minuti). */
+object DpcCache {
+    var frames by mutableStateOf<List<DpcRadar.Frame>?>(null)
+    var loading by mutableStateOf(false)
+    var progress by mutableStateOf("")
+    var error by mutableStateOf<String?>(null)
+    private var loadedAt = 0L
+    suspend fun ensure() {
+        if (loading) return
+        if (frames != null && System.currentTimeMillis() - loadedAt < 5 * 60_000) return
+        loading = true
+        error = null
+        try {
+            frames = DpcRadar.load { done, total -> progress = "Scarico il radar $done/$total…" }
+            loadedAt = System.currentTimeMillis()
+        } catch (e: Exception) {
+            error = e.message ?: "Radar non disponibile"
+        }
+        loading = false
+        progress = ""
+    }
+}
+
+private enum class RadarMode { DPC, RAINVIEWER, MODEL }
+
+private val MapModels = listOf(
+    "icon_seamless" to "ICON",
+    "ecmwf_ifs025" to "ECMWF",
+    "italia_meteo_arpae_icon_2i" to "ARPAE 2 km",
+    "icon_d2" to "ICON-D2 2 km",
+)
+
 @Composable
 fun RadarScreen() {
     val c = LocalAppColors.current
     val s = AppState.settings
     val place = currentPlace()
     val radar = RadarSource.byId(s.radarId)
-    // In Automatico si può passare da "Osservato" a "Previsione"
+    val inItaly = place?.let { DpcRadar.contains(it.lat, it.lon) } ?: true
+    // In Automatico si può passare da "Radar" a "Previsione"
     var autoForecast by remember { mutableStateOf(false) }
-    val showForecast = radar == RadarSource.MLMAP || (radar == RadarSource.AUTO && autoForecast)
+    val mode = when (radar) {
+        RadarSource.MLMAP -> RadarMode.MODEL
+        RadarSource.DPC -> RadarMode.DPC
+        RadarSource.RAINVIEWER -> RadarMode.RAINVIEWER
+        else -> if (autoForecast) RadarMode.MODEL else if (inItaly) RadarMode.DPC else RadarMode.RAINVIEWER
+    }
     val state = remember { MapState(place?.lat ?: 42.0, place?.lon ?: 12.5, 6.0) }
     var playing by remember { mutableStateOf(false) }
+    var phase by remember { mutableFloatStateOf(0f) }
     var showSources by remember { mutableStateOf(false) }
 
-    // radar osservato
+    // --- radar Protezione Civile
+    LaunchedEffect(mode) { if (mode == RadarMode.DPC) DpcCache.ensure() }
+    val dpc = DpcCache.frames
+    var dpcIndex by remember { mutableIntStateOf(-1) }
+    LaunchedEffect(dpc) { dpc?.let { l -> dpcIndex = l.indexOfLast { !it.forecast }.coerceAtLeast(0) } }
+    val dpcImages = remember(dpc) { android.util.LruCache<Int, ImageBitmap>(4) }
+    fun dpcImage(i: Int): ImageBitmap? {
+        val l = dpc ?: return null
+        val f = l.getOrNull(i) ?: return null
+        return dpcImages.get(i) ?: DpcRadar.render(f.q).also { dpcImages.put(i, it) }
+    }
+
+    // --- RainViewer
     LaunchedEffect(Unit) { RadarCache.ensure() }
     val frames = RadarCache.frames
     var frame by remember { mutableIntStateOf(-1) }
     LaunchedEffect(frames) { frames?.let { frame = it.frames.lastIndex } }
 
-    // mappa di previsione
+    // --- previsione dei modelli: la griglia segue la zona visibile
     var layer by remember { mutableStateOf(MapLayer.RAIN) }
     var grid by remember { mutableStateOf<WeatherRepo.Grid?>(null) }
+    var gridModel by remember { mutableStateOf("") }
+    var gridBounds by remember { mutableStateOf(doubleArrayOf()) }
     var gridLoading by remember { mutableStateOf(false) }
     var gridError by remember { mutableStateOf<String?>(null) }
-    var gridCenter by remember { mutableStateOf(Offset.Zero) }
     var hour by remember { mutableIntStateOf(0) }
-    var reload by remember { mutableIntStateOf(0) }
-    LaunchedEffect(showForecast, s.radarModel, reload) {
-        if (!showForecast) return@LaunchedEffect
-        gridLoading = true
-        gridError = null
-        val lat = state.lat; val lon = state.lon
-        try {
-            grid = WeatherRepo.grid(lat - 5.5, lat + 5.5, lon - 8.0, lon + 8.0, 15, s.radarModel)
-            gridCenter = Offset(lat.toFloat(), lon.toFloat())
-            val now = (place?.let { AppState.forecasts[it.id]?.localNow })
-            hour = grid?.times?.indexOfFirst { now != null && !it.isBefore(now.withMinute(0).withSecond(0).withNano(0)) }?.coerceAtLeast(0) ?: 0
-        } catch (e: Exception) {
-            gridError = e.message ?: "Errore"
-        }
-        gridLoading = false
-    }
-    val gridImage = remember(grid, layer, hour) { grid?.let { gridBitmap(it, layer, hour) } }
-
-    // animazione
-    LaunchedEffect(playing, showForecast) {
-        while (playing) {
-            delay(if (showForecast) 450 else 650)
-            if (showForecast) {
-                val n = grid?.times?.size ?: 0
-                if (n > 0) hour = (hour + 1) % n
-            } else {
-                val n = frames?.frames?.size ?: 0
-                if (n > 0) frame = (frame + 1) % n
+    var lastFetch by remember { mutableStateOf(0L) }
+    LaunchedEffect(mode, s.radarModel) {
+        if (mode != RadarMode.MODEL) return@LaunchedEffect
+        snapshotFlow { Triple(state.x, state.y, state.zoom) }.collectLatest {
+            delay(900)
+            if (state.viewW <= 0f) delay(500)
+            val b = state.bounds()
+            val g = grid
+            val gb = gridBounds
+            val covered = g != null && gridModel == s.radarModel && gb.size == 4 &&
+                b[0] >= gb[0] && b[1] <= gb[1] && b[2] >= gb[2] && b[3] <= gb[3]
+            val tooCoarse = gb.size == 4 && (gb[1] - gb[0]) > 3 * (b[1] - b[0])
+            if (covered && !tooCoarse) return@collectLatest
+            // rispetta i limiti gratuiti di Open-Meteo: al massimo una griglia ogni 12 secondi
+            val wait = 12_000 - (System.currentTimeMillis() - lastFetch)
+            if (wait > 0) delay(wait)
+            val latPad = (b[1] - b[0]) * 0.15
+            val lonPad = (b[3] - b[2]) * 0.15
+            val south = (b[0] - latPad).coerceAtLeast(-80.0)
+            val north = (b[1] + latPad).coerceAtMost(80.0)
+            val west = b[2] - lonPad
+            val east = b[3] + lonPad
+            gridLoading = true
+            gridError = null
+            lastFetch = System.currentTimeMillis()
+            try {
+                val shownTime = g?.times?.getOrNull(hour)
+                val ng = WeatherRepo.grid(south, north, west, east, 15, s.radarModel)
+                grid = ng
+                gridModel = s.radarModel
+                gridBounds = doubleArrayOf(south, north, west, east)
+                val now = place?.let { AppState.forecasts[it.id]?.localNow }?.withMinute(0)?.withSecond(0)?.withNano(0)
+                hour = when {
+                    shownTime != null -> ng.times.indexOf(shownTime).takeIf { it >= 0 } ?: 0
+                    now != null -> ng.times.indexOfFirst { !it.isBefore(now) }.coerceAtLeast(0)
+                    else -> 0
+                }
+            } catch (e: Exception) {
+                gridError = e.message ?: "Errore"
             }
+            gridLoading = false
+        }
+    }
+    val gridCount = grid?.times?.size ?: 0
+    val gridA = remember(grid, layer, hour) { grid?.let { gridBitmap(it, layer, hour) } }
+    val gridB = remember(grid, layer, hour) { grid?.let { if (gridCount > 0) gridBitmap(it, layer, (hour + 1) % gridCount) else null } }
+
+    // --- animazione con dissolvenza tra un fotogramma e il successivo
+    LaunchedEffect(playing, mode) {
+        phase = 0f
+        while (playing) {
+            val steps = 8
+            for (k in 1..steps) {
+                delay(if (mode == RadarMode.MODEL) 60 else 80)
+                phase = k / steps.toFloat()
+            }
+            when (mode) {
+                RadarMode.MODEL -> if (gridCount > 0) hour = (hour + 1) % gridCount
+                RadarMode.DPC -> dpc?.let { if (it.isNotEmpty()) dpcIndex = (dpcIndex + 1) % it.size }
+                RadarMode.RAINVIEWER -> frames?.let { if (it.frames.isNotEmpty()) frame = (frame + 1) % it.frames.size }
+            }
+            phase = 0f
         }
     }
 
     val layers = buildList {
         add(baseLayer(c.dark))
-        if (!showForecast && frames != null) {
-            frames.frames.getOrNull(frame)?.let { add(rainViewerLayer(frames.host, it.second)) }
-            // precarica il frame successivo
-            frames.frames.getOrNull((frame + 1) % frames.frames.size.coerceAtLeast(1))?.let {
-                Tiles.get(rainViewerLayer(frames.host, it.second).url(
-                    kotlin.math.floor(state.zoom).toInt().coerceIn(1, 7),
-                    (state.x * (1 shl kotlin.math.floor(state.zoom).toInt().coerceIn(1, 7))).toInt(),
-                    (state.y * (1 shl kotlin.math.floor(state.zoom).toInt().coerceIn(1, 7))).toInt(),
-                ))
-            }
+        if (mode == RadarMode.RAINVIEWER && frames != null) {
+            frames.frames.getOrNull(frame)?.let { add(TileLayer(7, 0.8f, zoomBoost = 1) { z, x, y -> "${frames.host}${it.second}/256/$z/$x/$y/2/1_1.png" }) }
         }
     }
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
-        TileMap(state, layers, maxZoom = if (showForecast) 10.0 else 9.0) { project, _ ->
-            val g = grid
-            val img = gridImage
-            if (showForecast && g != null && img != null) {
-                val stepLat = (g.lats.last() - g.lats.first()) / (g.lats.size - 1)
-                val stepLon = (g.lons.last() - g.lons.first()) / (g.lons.size - 1)
-                val tl = project(g.lats.last() + stepLat / 20, g.lons.first() - stepLon / 20)
-                val br = project(g.lats.first() - stepLat / 20, g.lons.last() + stepLon / 20)
+        TileMap(state, layers, maxZoom = 11.0) { project, _ ->
+            fun drawRaster(img: ImageBitmap, n: Double, sLat: Double, w: Double, e: Double, alpha: Float) {
+                val tl = project(n, w)
+                val br = project(sLat, e)
                 drawImage(
                     img, IntOffset.Zero, IntSize(img.width, img.height),
                     IntOffset(tl.x.roundToInt(), tl.y.roundToInt()),
                     IntSize((br.x - tl.x).roundToInt().coerceAtLeast(1), (br.y - tl.y).roundToInt().coerceAtLeast(1)),
+                    alpha = alpha,
                     filterQuality = FilterQuality.Low,
                 )
+            }
+            when (mode) {
+                RadarMode.DPC -> {
+                    val a = dpcImage(dpcIndex)
+                    val nextIdx = dpc?.let { if (it.isEmpty()) -1 else (dpcIndex + 1) % it.size } ?: -1
+                    val b = if (phase > 0f) dpcImage(nextIdx) else null
+                    if (a != null) drawRaster(a, DpcRadar.NORTH, DpcRadar.SOUTH, DpcRadar.WEST, DpcRadar.EAST, 1f - phase * (if (b != null) 1f else 0f))
+                    if (b != null) drawRaster(b, DpcRadar.NORTH, DpcRadar.SOUTH, DpcRadar.WEST, DpcRadar.EAST, phase)
+                }
+                RadarMode.MODEL -> {
+                    val g = grid
+                    if (g != null && g.lats.size > 1 && g.lons.size > 1) {
+                        val stepLat = (g.lats.last() - g.lats.first()) / (g.lats.size - 1)
+                        val stepLon = (g.lons.last() - g.lons.first()) / (g.lons.size - 1)
+                        val n = g.lats.last() + stepLat / 20; val sLat = g.lats.first() - stepLat / 20
+                        val w = g.lons.first() - stepLon / 20; val e = g.lons.last() + stepLon / 20
+                        gridA?.let { drawRaster(it, n, sLat, w, e, if (gridB != null) 1f - phase else 1f) }
+                        if (phase > 0f) gridB?.let { drawRaster(it, n, sLat, w, e, phase) }
+                    }
+                }
+                else -> {}
             }
             if (place != null) {
                 val p = project(place.lat, place.lon)
@@ -238,24 +336,34 @@ fun RadarScreen() {
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     Text(place?.name ?: "Radar", color = c.ink, fontSize = 16.sp, maxLines = 1)
-                    Text(radar.title, color = c.inkDim, fontSize = 12.sp, maxLines = 1)
+                    Text(
+                        when (mode) {
+                            RadarMode.DPC -> "Radar Protezione Civile + previsto 60 min"
+                            RadarMode.RAINVIEWER -> "Radar RainViewer"
+                            RadarMode.MODEL -> "Previsione dei modelli"
+                        },
+                        color = c.inkDim, fontSize = 12.sp, maxLines = 1,
+                    )
                 }
                 RoundButton(Icons.Filled.Layers, "Fonte radar") { showSources = true }
             }
             if (radar == RadarSource.AUTO) {
                 Box(Modifier.fillMaxWidth(0.8f).align(Alignment.CenterHorizontally)) {
-                    Segmented(listOf("obs" to "Osservato", "fc" to "Previsione"), if (autoForecast) "fc" else "obs") {
+                    Segmented(listOf("obs" to "Radar", "fc" to "Previsione"), if (autoForecast) "fc" else "obs") {
                         autoForecast = it == "fc"; playing = false
                     }
                 }
             }
-            if (showForecast) {
+            if (mode == RadarMode.MODEL) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MapLayer.entries.forEach { l ->
                         FilterChip(selected = layer == l, onClick = { layer = l }, label = { Text(l.label) })
                     }
-                    FilterChip(selected = s.radarModel == "icon_seamless", onClick = { AppState.update { it.copy(radarModel = "icon_seamless") } }, label = { Text("ICON") })
-                    FilterChip(selected = s.radarModel == "ecmwf_ifs025", onClick = { AppState.update { it.copy(radarModel = "ecmwf_ifs025") } }, label = { Text("ECMWF") })
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MapModels.forEach { (id, label) ->
+                        FilterChip(selected = s.radarModel == id, onClick = { AppState.update { it.copy(radarModel = id) } }, label = { Text(label) })
+                    }
                 }
             }
         }
@@ -265,10 +373,6 @@ fun RadarScreen() {
             RoundButton(Icons.Filled.MyLocation, "Centra") {
                 place?.let { state.x = lonToX(it.lon); state.y = latToY(it.lat) }
             }
-            if (showForecast) {
-                val moved = abs(state.lat - gridCenter.x) > 3 || abs(state.lon - gridCenter.y) > 4
-                if (moved || gridError != null) RoundButton(Icons.Filled.Refresh, "Aggiorna area") { reload++ }
-            }
         }
 
         // barra del tempo
@@ -276,29 +380,52 @@ fun RadarScreen() {
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(12.dp)
                 .clip(RoundedCornerShape(24.dp)).background(c.card).padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
-            val label: String
-            val count: Int
-            val index: Int
-            if (showForecast) {
-                val g = grid
-                count = g?.times?.size ?: 0
-                index = hour
-                label = when {
-                    gridLoading -> "Calcolo della mappa…"
-                    gridError != null -> "Errore: $gridError"
-                    g != null && count > 0 -> g.times[hour.coerceIn(0, count - 1)]
-                        .format(DateTimeFormatter.ofPattern("EEE d · HH:mm", Locale.ITALY)).replaceFirstChar { it.uppercase() } +
-                        " · ${if (s.radarModel == "ecmwf_ifs025") "ECMWF" else "ICON"}"
-                    else -> ""
+            var label = ""
+            var future = false
+            var count = 0
+            var index = 0
+            var busy = false
+            when (mode) {
+                RadarMode.MODEL -> {
+                    val g = grid
+                    count = gridCount
+                    index = hour
+                    busy = gridLoading
+                    label = when {
+                        gridError != null -> "Errore: $gridError"
+                        g != null && count > 0 -> g.times[hour.coerceIn(0, count - 1)]
+                            .format(DateTimeFormatter.ofPattern("EEE d · HH:mm", Locale.ITALY)).replaceFirstChar { it.uppercase() } +
+                            " · " + (MapModels.firstOrNull { it.first == gridModel }?.second ?: "")
+                        gridLoading -> "Calcolo della mappa…"
+                        else -> "Fermati su una zona per calcolare la mappa"
+                    }
+                    if (gridModel == "icon_d2" || gridModel == "italia_meteo_arpae_icon_2i") label += " (area limitata)"
                 }
-            } else {
-                count = frames?.frames?.size ?: 0
-                index = frame
-                label = frames?.frames?.getOrNull(frame)?.let {
-                    Instant.ofEpochSecond(it.first).atZone(ZoneId.systemDefault())
-                        .format(DateTimeFormatter.ofPattern("HH:mm", Locale.ITALY)) +
-                        if (frame == count - 1) " · ultimo dato" else ""
-                } ?: "Caricamento radar…"
+                RadarMode.DPC -> {
+                    val l = dpc
+                    count = l?.size ?: 0
+                    index = dpcIndex
+                    busy = DpcCache.loading
+                    val f = l?.getOrNull(dpcIndex)
+                    future = f?.forecast == true
+                    label = when {
+                        DpcCache.loading -> DpcCache.progress.ifBlank { "Scarico il radar…" }
+                        DpcCache.error != null -> "Errore: ${DpcCache.error}"
+                        f != null -> Instant.ofEpochMilli(f.time).atZone(ZoneId.systemDefault())
+                            .format(DateTimeFormatter.ofPattern("HH:mm", Locale.ITALY)) +
+                            if (f.forecast) " · previsto" else if (l?.indexOfLast { !it.forecast } == dpcIndex) " · ultimo dato" else ""
+                        else -> ""
+                    }
+                }
+                RadarMode.RAINVIEWER -> {
+                    count = frames?.frames?.size ?: 0
+                    index = frame
+                    label = frames?.frames?.getOrNull(frame)?.let {
+                        Instant.ofEpochSecond(it.first).atZone(ZoneId.systemDefault())
+                            .format(DateTimeFormatter.ofPattern("HH:mm", Locale.ITALY)) +
+                            if (frame == count - 1) " · ultimo dato" else ""
+                    } ?: "Caricamento radar…"
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -310,21 +437,33 @@ fun RadarScreen() {
                 }
                 Gap(12)
                 Column(Modifier.weight(1f)) {
-                    Text(label, color = c.ink, fontSize = 14.sp, maxLines = 1)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, color = if (future) c.accent else c.ink, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                        if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    }
                     if (count > 1) {
                         Slider(
                             value = index.coerceIn(0, count - 1).toFloat(),
-                            onValueChange = { v -> playing = false; if (showForecast) hour = v.roundToInt() else frame = v.roundToInt() },
+                            onValueChange = { v ->
+                                playing = false
+                                when (mode) {
+                                    RadarMode.MODEL -> hour = v.roundToInt()
+                                    RadarMode.DPC -> dpcIndex = v.roundToInt()
+                                    RadarMode.RAINVIEWER -> frame = v.roundToInt()
+                                }
+                            },
                             valueRange = 0f..(count - 1).toFloat(),
                         )
-                    } else if (gridLoading) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     }
                 }
             }
-            Legend(if (showForecast) layer else MapLayer.RAIN, showForecast)
+            Legend(if (mode == RadarMode.MODEL) layer else MapLayer.RAIN, mode == RadarMode.MODEL)
             Text(
-                "© OpenStreetMap contributors · " + if (showForecast) "Dati Open-Meteo" else "Rain Viewer",
+                "© OpenStreetMap contributors · " + when (mode) {
+                    RadarMode.DPC -> "Radar: Dipartimento della Protezione Civile"
+                    RadarMode.RAINVIEWER -> "Rain Viewer"
+                    RadarMode.MODEL -> "Dati Open-Meteo"
+                },
                 color = c.inkDim, fontSize = 10.sp,
             )
         }

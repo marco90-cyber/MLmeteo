@@ -53,10 +53,10 @@ object Sources {
 }
 
 enum class RadarSource(val id: String, val title: String, val info: String, val available: Boolean) {
-    AUTO("auto", "Automatico", "Mappa MLMeteo per la previsione, RainViewer per la pioggia osservata.", true),
-    RAINVIEWER("rainviewer", "RainViewer (attuale e storico)", "Radar reale di tutto il mondo, ultime 2 ore. Zoom limitato.", true),
-    MLMAP("mlmap", "Mappa MLMeteo (attuale e previsione)", "Disegnata dall'app con i dati ICON o ECMWF: pioggia, temperatura, nuvole e vento per i prossimi 3 giorni.", true),
-    DPC("dpc", "Protezione Civile (Italia)", "Radar nazionale ogni 5 minuti. In arrivo in una prossima versione.", false),
+    AUTO("auto", "Automatico", "In Italia il radar della Protezione Civile con il previsto a 60 minuti, fuori dall'Italia RainViewer. Puoi passare alla previsione dei modelli.", true),
+    DPC("dpc", "Protezione Civile (Italia)", "Radar nazionale dettagliato (1 km) ogni 10 minuti, ultima ora più il radar previsto per i prossimi 60 minuti.", true),
+    RAINVIEWER("rainviewer", "RainViewer (attuale e storico)", "Radar reale di tutto il mondo, ultime 2 ore. Meno dettagliato.", true),
+    MLMAP("mlmap", "Mappa MLMeteo (attuale e previsione)", "Disegnata dall'app con i modelli ICON, ECMWF, ARPAE o ICON-D2: pioggia, temperatura, nuvole e vento per i prossimi giorni. Più zoomi, più è dettagliata.", true),
     OWM("owm", "OpenWeatherMap (con chiave)", "Strati extra con la tua chiave API. In arrivo in una prossima versione.", false);
 
     companion object {

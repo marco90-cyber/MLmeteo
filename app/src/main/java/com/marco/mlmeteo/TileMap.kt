@@ -54,6 +54,18 @@ class MapState(lat: Double, lon: Double, zoom: Double) {
     var zoom by mutableDoubleStateOf(zoom)
     val lat get() = yToLat(y)
     val lon get() = xToLon(x)
+    /** Dimensioni della mappa sullo schermo (aggiornate a ogni disegno). */
+    var viewW = 0f
+    var viewH = 0f
+    var density = 3f
+
+    /** Area visibile: sud, nord, ovest, est. */
+    fun bounds(): DoubleArray {
+        val world = 256.0 * density * 2.0.pow(zoom)
+        val hw = viewW / 2 / world
+        val hh = viewH / 2 / world
+        return doubleArrayOf(yToLat((y + hh).coerceAtMost(1.0)), yToLat((y - hh).coerceAtLeast(0.0)), xToLon(x - hw), xToLon(x + hw))
+    }
 }
 
 /** Cache delle tessere: si ridisegna quando ne arriva una nuova. */
@@ -113,6 +125,9 @@ fun TileMap(
     } else modifier
     Canvas(mod.fillMaxSize()) {
         @Suppress("UNUSED_VARIABLE") val v = Tiles.version // ridisegna quando arrivano tessere
+        state.viewW = size.width
+        state.viewH = size.height
+        state.density = density
         val world = 256.0 * density * 2.0.pow(state.zoom)
         val cx = state.x * world
         val cy = state.y * world
