@@ -1,0 +1,14 @@
+name: Probe ICON-2I
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Elenco file
+        run: |
+          curl -sSL "https://meteohub.agenziaitaliameteo.it/nwp/" | sed 's/<[^>]*>/ /g' | tr -s ' ' | head -60
+          echo ----
+          curl -sSL "https://meteohub.agenziaitaliameteo.it/nwp/ICON-2I_SURFACE_PRESSURE_LEVELS/" | sed 's/<[^>]*>/ /g' | tr -s ' ' | head -60
+          echo ----
+          curl -sSI "https://meteohub.agenziaitaliameteo.it/nwp/" | head -20
