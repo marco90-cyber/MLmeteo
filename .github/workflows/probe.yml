@@ -1,0 +1,28 @@
+name: Probe ICON-2I
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verifica decodifica
+        run: |
+          sudo apt-get install -y -qq libeccodes-tools > /dev/null 2>&1
+          B=https://meteohub.agenziaitaliameteo.it/nwp/ICON_2I_RUC
+          R=$(curl -sSL $B/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2 | tr -d /)
+          for V in T_2M TOT_PREC; do
+            F=$(curl -sSL $B/$R/$V/ | grep -o 'href="[^"]*grib"' | head -1 | cut -d'"' -f2)
+            python3 -c "
+          import urllib.request,struct
+          u='$B/$R/$V/$F';off=0
+          for k in range(6):
+              h=urllib.request.urlopen(urllib.request.Request(u,headers={'Range':'bytes=%d-%d'%(off,off+15)})).read();ln=struct.unpack('>Q',h[8:16])[0]
+              if k==5: open('m.grib','wb').write(urllib.request.urlopen(urllib.request.Request(u,headers={'Range':'bytes=%d-%d'%(off,off+ln-1)})).read())
+              off+=ln"
+            echo "== $V"; python3 .github/probe_grib.py
+          done
+          python3 -c "
+          w=20037508.342789244;z=6;x=34;y=24;ts=2*w/(1<<z);minx=-w+x*ts;maxy=w-y*ts
+          print('https://view.eumetsat.int/geoserver/wms?service=WMS&request=GetMap&version=1.3.0&layers=mtg_fd:li_afa&styles=&crs=EPSG:3857&bbox=%s,%s,%s,%s&width=256&height=256&format=image/png&transparent=true'%(minx,maxy-ts,minx+ts,maxy))" > u.txt
+          curl -sS -o t.png -w "%{http_code} %{content_type} %{size_download}\n" "$(cat u.txt)"
