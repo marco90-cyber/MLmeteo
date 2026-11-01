@@ -9,18 +9,26 @@ jobs:
         run: |
           sudo apt-get install -y -qq libeccodes-tools > /dev/null 2>&1
           B=https://meteohub.agenziaitaliameteo.it/nwp
-          L() { curl -sSL "$1" | sed 's/<[^>]*>/ /g' | tr -s ' ' | grep -v '^ *$' | head -${2:-12}; }
-          for M in MOLOCH_AIM WRF; do
-            echo "######## $M"; L $B/$M/ 8
-            R=$(curl -sSL $B/$M/ | grep -o 'href="[^"]*/"' | grep -v '\.\.' | tail -1 | cut -d'"' -f2)
-            echo "ultimo: $R"; L $B/$M/$R 40
-            S=$(curl -sSL $B/$M/$R | grep -o 'href="[^"]*"' | grep -v '\.\.' | grep -iE 'tot_prec|tp|prec' | head -1 | cut -d'"' -f2)
-            [ -z "$S" ] && S=$(curl -sSL $B/$M/$R | grep -o 'href="[^"]*"' | grep -v '\.\.' | sed -n 2p | cut -d'"' -f2)
-            echo "sotto: $S"; L $B/$M/$R$S 10
-            F=$(curl -sSL $B/$M/$R$S | grep -o 'href="[^"]*\.grib[^"]*"' | head -1 | cut -d'"' -f2)
-            if [ -n "$F" ]; then
-              curl -sSL -r 0-4000000 -o x.grib "$B/$M/$R$S$F"
-              grib_ls -p shortName,stepRange,packingType,gridType,Ni,Nj x.grib 2>&1 | head -4
-              grib_dump -O x.grib 2>/dev/null | grep -E "latitudeOfFirst|longitudeOfFirst|latitudeOfLast|longitudeOfLast|iDirectionIncrement|jDirectionIncrement|latitudeOfSouthernPole|longitudeOfSouthernPole" | head -10
-            fi
+          for MV in MOLOCH_AIM/2t MOLOCH_AIM/papt WRF/2t WRF/tp WRF/srweq; do
+            M=${MV%/*}; V=${MV#*/}
+            R=$(curl -sSL $B/$M/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2)
+            F=$(curl -sSL $B/$M/$R$V/ | grep -o 'href="[^"]*grib[^"]*"' | head -1 | cut -d'"' -f2)
+            echo "######## $MV $F"
+            curl -sSL $B/$M/$R | grep -o 'href="[a-z_0-9]*/"' | tr '\n' ' ' | head -c 600; echo
+            [ -z "$F" ] && continue
+            curl -sSI "$B/$M/$R$V/$F" | grep -i content-length
+            python3 -c "
+          import urllib.request,struct
+          u='$B/$M/$R$V/$F';off=0;L=[]
+          for k in range(80):
+              try: h=urllib.request.urlopen(urllib.request.Request(u,headers={'Range':'bytes=%d-%d'%(off,off+15)})).read()
+              except Exception: break
+              if h[:4]!=b'GRIB': break
+              ln=struct.unpack('>Q',h[8:16])[0];L.append(ln)
+              if k==3: open('x.grib','wb').write(urllib.request.urlopen(urllib.request.Request(u,headers={'Range':'bytes=%d-%d'%(off,off+ln-1)})).read())
+              off+=ln
+          print('messaggi',len(L),'dim',sorted(set(L))[:3])"
+            grib_ls -p shortName,stepRange,packingType,gridType,Ni,Nj,bitsPerValue x.grib 2>&1 | sed -n 2,3p
+            grib_dump -O x.grib 2>/dev/null | grep -E "latitudeOfFirst|longitudeOfFirst|latitudeOfLast|longitudeOfLast|iDirectionIncrement |jDirectionIncrement |latitudeOfSouthernPole |longitudeOfSouthernPole |scanningMode" | head -9
+            rm -f x.grib
           done
