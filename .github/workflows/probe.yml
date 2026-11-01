@@ -7,15 +7,34 @@ jobs:
     steps:
       - name: Allerte
         run: |
-          echo "#### DPC repo"
-          curl -sS "https://api.github.com/repos/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica/contents/" | python3 -c "import json,sys;[print(x['name'],x['type'],x.get('size')) for x in json.load(sys.stdin)]"
-          curl -sS "https://api.github.com/repos/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica/commits?per_page=2" | python3 -c "import json,sys;[print(c['commit']['committer']['date'],c['commit']['message'][:80]) for c in json.load(sys.stdin)]"
-          echo "#### DPC files dir"
-          curl -sS "https://api.github.com/repos/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica/contents/files" | python3 -c "import json,sys;d=json.load(sys.stdin);[print(x['name'],x['type']) for x in (d if isinstance(d,list) else [])][:20]" || true
+          R=pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica
+          curl -sS "https://raw.githubusercontent.com/$R/master/README.md" | head -60 || curl -sS "https://raw.githubusercontent.com/$R/main/README.md" | head -60
+          SHA=$(curl -sS "https://api.github.com/repos/$R/commits?per_page=1" | python3 -c "import json,sys;print(json.load(sys.stdin)[0]['sha'])")
+          curl -sS "https://api.github.com/repos/$R/commits/$SHA" | python3 -c "import json,sys;d=json.load(sys.stdin);[print(f['filename'],f['status']) for f in d['files']]"
+          F=$(curl -sS "https://api.github.com/repos/$R/commits/$SHA" | python3 -c "import json,sys;d=json.load(sys.stdin);print([f['raw_url'] for f in d['files'] if f['filename'].endswith('.json')][0])")
+          echo "FILE $F"; curl -sSL "$F" -o b.json; ls -la b.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('b.json'))
+          print(type(d), list(d.keys())[:10] if isinstance(d,dict) else len(d))
+          fs=d.get('features',[])
+          print('features',len(fs))
+          for f in fs[:2]:
+              print(json.dumps(f['properties'],ensure_ascii=False)[:800]); print(f['geometry']['type'], str(f['geometry']['coordinates'])[:150])
+          import collections
+          keys=collections.Counter()
+          for f in fs:
+              for k,v in f['properties'].items():
+                  if 'criti' in k.lower() or 'allert' in k.lower() or 'level' in k.lower(): keys[(k,str(v)[:30])]+=1
+          print(keys.most_common(30))
+          PY
           echo "#### MeteoAlarm"
           curl -sS -o ma.xml -w "%{http_code} %{size_download}\n" "https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-italy"
-          head -c 3000 ma.xml; echo
-          grep -o "<cap:geocode>.\{0,200\}" ma.xml | head -3
-          grep -c "<entry>" ma.xml
-          L=$(grep -o 'href="[^"]*" type="application/cap+xml"' ma.xml | head -1 | cut -d'"' -f2)
-          echo "CAP $L"; [ -n "$L" ] && curl -sS "$L" | head -c 4000
+          python3 - <<'PY'
+          import re
+          s=open('ma.xml').read()
+          print(s[:1500])
+          e=s.split('<entry>')
+          print('entries',len(e)-1)
+          if len(e)>1: print(e[1][:3000])
+          PY
