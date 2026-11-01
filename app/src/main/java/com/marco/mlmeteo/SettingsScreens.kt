@@ -132,9 +132,17 @@ fun SettingsScreen() {
             SettingRow("Notifiche", "Allerte, pioggia in arrivo, previsione del mattino", Icons.Filled.Notifications,
                 onClick = { Nav.go(Screen.NOTIFICATIONS) })
             Divider()
-            SettingRow("Widget", "In arrivo", Icons.Filled.Widgets, enabled = false)
+            SettingRow("Widget", "Tieni premuto sulla schermata Home → Widget → MLMeteo (3 dimensioni)", Icons.Filled.Widgets)
             Divider()
-            SettingRow("Aggiornamento in background", "In arrivo con notifiche e widget", Icons.Filled.Refresh, enabled = false)
+            ChoiceRow(
+                "Aggiornamento in background", Icons.Filled.Refresh,
+                listOf(Choice("30", "Ogni 30 minuti"), Choice("60", "Ogni ora"), Choice("120", "Ogni 2 ore"), Choice("180", "Ogni 3 ore")),
+                s.updateFreq.toString(),
+            ) { v -> AppState.update { it.copy(updateFreq = v.toInt()) } }
+            Divider()
+            SwitchRow("Solo con Wi-Fi", "Aggiorna in background solo quando sei in Wi-Fi", checked = s.wifiOnly) { v ->
+                AppState.update { it.copy(wifiOnly = v) }
+            }
         }
 
         SectionTitle("Info")
@@ -375,21 +383,81 @@ fun UnitsScreen() {
     }
 }
 
-// ------------------------------------------------------------------ notifiche (prossima versione)
+// ------------------------------------------------------------------ notifiche
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationsScreen() {
+    val s = AppState.settings
+    val ctx = LocalContext.current
+    var granted by remember { mutableStateOf(Notify.canPost(ctx)) }
+    val ask = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted = it }
+    fun need() { if (!granted && Build.VERSION.SDK_INT >= 33) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
+    var picking by remember { mutableStateOf(false) }
+    val main = AppState.mainPlace()
     Page("Notifiche") {
-        Hint("Le notifiche arrivano nella prossima versione. Ecco cosa ci sarà:")
-        Group {
-            SettingRow("Allerte meteo", "Protezione Civile e MeteoAlarm, solo per la località con la campanella", Icons.Filled.Notifications, enabled = false)
-            Divider()
-            SettingRow("Pioggia in arrivo", "\"Pioggia tra 15 minuti\"", Icons.Filled.WaterDrop, enabled = false)
-            Divider()
-            SettingRow("Previsione del mattino", "All'orario che scegli", Icons.Filled.AccessTime, enabled = false)
-            Divider()
-            SettingRow("Temperatura nella barra di stato", "Notifica fissa", Icons.Filled.Thermostat, enabled = false)
+        if (!granted) {
+            CardBox {
+                Text("Le notifiche sono disattivate per MLMeteo.", color = LocalAppColors.current.ink, fontSize = 15.sp)
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = { need() }) { Text("Consenti notifiche") }
+            }
         }
+        Hint("Allerte e pioggia riguardano la località con la campanella" + (main?.let { ": ${it.name}." } ?: "."))
+        Group {
+            SwitchRow("Allerte meteo", "Protezione Civile e MeteoAlarm", Icons.Filled.Notifications, checked = s.notifAlerts) { v ->
+                AppState.update { it.copy(notifAlerts = v) }; if (v) need()
+            }
+            if (s.notifAlerts) {
+                Divider()
+                ChoiceRow(
+                    "Livello minimo", null,
+                    listOf(Choice("1", "Da gialla"), Choice("2", "Da arancione"), Choice("3", "Solo rossa")),
+                    s.alertMinLevel.toString(),
+                ) { v -> AppState.update { it.copy(alertMinLevel = v.toInt()) } }
+            }
+            Divider()
+            SwitchRow("Pioggia in arrivo", "\"Pioggia tra circa 15 minuti\"", Icons.Filled.WaterDrop, checked = s.notifRain) { v ->
+                AppState.update { it.copy(notifRain = v) }; if (v) need()
+            }
+            Divider()
+            SwitchRow("Previsione del mattino", null, Icons.Filled.AccessTime, checked = s.notifMorning) { v ->
+                AppState.update { it.copy(notifMorning = v) }; if (v) need()
+            }
+            if (s.notifMorning) {
+                Divider()
+                SettingRow(
+                    "Orario", String.format(java.util.Locale.ITALY, "Alle %02d:%02d", s.morningMinutes / 60, s.morningMinutes % 60),
+                    null, onClick = { picking = true },
+                )
+            }
+            Divider()
+            SwitchRow("Temperatura nella barra di stato", "Notifica fissa con la temperatura come icona", Icons.Filled.Thermostat, checked = s.notifStatus) { v ->
+                AppState.update { it.copy(notifStatus = v) }; if (v) need()
+            }
+            Divider()
+            SwitchRow("Silenzio notturno", "Dalle 22 alle 7 niente pioggia e allerte gialle o arancioni", checked = s.quietNight) { v ->
+                AppState.update { it.copy(quietNight = v) }
+            }
+        }
+        Hint("Le notifiche usano l'aggiornamento in background (Impostazioni → Notifiche e widget). La previsione del mattino può arrivare con qualche minuto di ritardo se il telefono è in risparmio energetico.")
+    }
+    if (picking) {
+        val st = androidx.compose.material3.rememberTimePickerState(s.morningMinutes / 60, s.morningMinutes % 60, is24Hour = true)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { picking = false },
+            title = { Text("Orario della previsione") },
+            text = { androidx.compose.material3.TimePicker(state = st) },
+            confirmButton = {
+                TextButton(onClick = {
+                    AppState.update { it.copy(morningMinutes = st.hour * 60 + st.minute) }
+                    picking = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Annulla") } },
+        )
     }
 }
 

@@ -327,6 +327,7 @@ object WeatherRepo {
                 region = parts.joinToString(", "),
                 lat = r.optDouble("latitude"),
                 lon = r.optDouble("longitude"),
+                cc = r.optString("country_code").lowercase(),
             )
         }
     }
@@ -382,16 +383,17 @@ object WeatherRepo {
     }
 }
 
-/** Nome della località dalle coordinate (OpenStreetMap Nominatim), se il telefono non ha il geocoder. */
-fun reverseName(lat: Double, lon: Double): String? = try {
+/** Nome, regione e paese dalle coordinate (OpenStreetMap Nominatim), se il telefono non ha il geocoder. */
+fun reverseName(lat: Double, lon: Double): Triple<String, String, String>? = try {
     val o = JSONObject(Net.get(
         "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=it" +
             "&lat=${String.format(Locale.US, "%.4f", lat)}&lon=${String.format(Locale.US, "%.4f", lon)}"
     ))
     val a = o.optJSONObject("address")
-    listOf("city", "town", "village", "municipality", "county").firstNotNullOfOrNull { k ->
+    val name = listOf("city", "town", "village", "municipality", "county").firstNotNullOfOrNull { k ->
         a?.optString(k)?.takeIf { it.isNotBlank() }
     } ?: o.optString("name").takeIf { it.isNotBlank() }
+    if (name == null) null else Triple(name, a?.optString("state") ?: "", a?.optString("country_code")?.lowercase() ?: "")
 } catch (e: Exception) { null }
 
 /** Distanza approssimata in km (per riconoscere la stessa località). */

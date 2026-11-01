@@ -66,6 +66,8 @@ data class Place(
     val lat: Double,
     val lon: Double,
     val gps: Boolean = false,
+    /** Codice paese (it, fr…), per le allerte MeteoAlarm. */
+    val cc: String = "",
 )
 
 fun Double.ok() = !isNaN()

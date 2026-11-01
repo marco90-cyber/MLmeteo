@@ -39,6 +39,7 @@ object AppState {
     var gpsStatus by mutableStateOf("")
 
     val forecasts = mutableStateMapOf<String, Forecast>()
+    val alerts = mutableStateMapOf<String, List<Alert>>()
     val air = mutableStateMapOf<String, AirQuality>()
     val errors = mutableStateMapOf<String, String>()
     val loading = mutableStateMapOf<String, Boolean>()
@@ -52,10 +53,16 @@ object AppState {
         app = ctx.applicationContext
         Icon2i.cacheDir = app.cacheDir
         Wrf.cacheDir = app.cacheDir
+        AlertsRepo.cacheDir = app.cacheDir
         settings = Prefs.loadSettings(app)
         savedPlaces = Prefs.loadPlaces(app)
         gpsPlace = Prefs.loadGps(app)
+        // ultimi dati salvati: l'app mostra subito qualcosa anche senza rete
+        (listOfNotNull(gpsPlace) + savedPlaces).forEach { p -> ForecastStore.load(app, p.id)?.let { forecasts[p.id] = it } }
     }
+
+    /** Località principale (quella con la campanella): riceve allerte e notifiche. */
+    fun mainPlace(): Place? = places.firstOrNull { it.id == settings.mainPlaceId } ?: places.firstOrNull()
 
     /** Località mostrate, nell'ordine: GPS (se attivo) e poi quelle salvate. */
     val places: List<Place>
@@ -66,9 +73,18 @@ object AppState {
         settings = block(settings)
         Prefs.saveSettings(app, settings)
         if (old.sourceId != settings.sourceId) {
-            forecasts.clear()
             refreshAll()
         }
+        if (old.updateFreq != settings.updateFreq || old.wifiOnly != settings.wifiOnly ||
+            old.notifMorning != settings.notifMorning || old.morningMinutes != settings.morningMinutes
+        ) Background.schedule(app)
+        if (old.notifStatus != settings.notifStatus || old.mainPlaceId != settings.mainPlaceId) {
+            mainPlace()?.let { p -> forecasts[p.id]?.let { Notify.statusBar(app, p, it) } } ?: Notify.cancelStatus(app)
+            if (!settings.notifStatus) Notify.cancelStatus(app)
+        }
+        if (old.iconSet != settings.iconSet || old.mode != settings.mode || old.useWallpaper != settings.useWallpaper ||
+            old.manualColor != settings.manualColor || old.tempUnit != settings.tempUnit || old.rainDisplay != settings.rainDisplay
+        ) Widgets.updateAll(app)
     }
 
     // ------------------------------------------------------------------ località
@@ -105,14 +121,19 @@ object AppState {
         val source = Sources.byId(settings.sourceId)
         scope.launch {
             try {
-                forecasts[p.id] = WeatherRepo.forecast(p, source)
+                val f = WeatherRepo.forecast(p, source)
+                forecasts[p.id] = f
                 errors.remove(p.id)
+                ForecastStore.save(app, p.id, f)
+                Widgets.updateAll(app)
+                if (p.id == mainPlace()?.id) Notify.statusBar(app, p, f)
             } catch (e: Exception) {
                 errors[p.id] = e.message ?: "Errore di rete"
             } finally {
                 loading[p.id] = false
             }
             WeatherRepo.airQuality(p)?.let { air[p.id] = it }
+            try { alerts[p.id] = AlertsRepo.forPlace(p) } catch (e: Exception) { }
         }
     }
 
@@ -137,10 +158,13 @@ object AppState {
                 gpsPlace?.let { refreshIfOld(it) }
                 return@launch
             }
-            val name = withContext(Dispatchers.IO) {
+            val info = withContext(Dispatchers.IO) {
                 cityName(loc.latitude, loc.longitude) ?: reverseName(loc.latitude, loc.longitude)
-            } ?: gpsPlace?.name?.takeIf { it != "Posizione attuale" } ?: "Posizione attuale"
-            val p = Place("gps", name, "Posizione attuale", loc.latitude, loc.longitude, gps = true)
+            }
+            val name = info?.first ?: gpsPlace?.name?.takeIf { it != "Posizione attuale" } ?: "Posizione attuale"
+            val region = info?.second?.takeIf { it.isNotBlank() } ?: gpsPlace?.region ?: "Posizione attuale"
+            val cc = info?.third?.takeIf { it.isNotBlank() } ?: gpsPlace?.cc ?: ""
+            val p = Place("gps", name, region, loc.latitude, loc.longitude, gps = true, cc = cc)
             val moved = gpsPlace?.let { roughKm(it, p) > 2.0 } ?: true
             gpsPlace = p
             Prefs.saveGps(app, p)
@@ -186,12 +210,13 @@ object AppState {
         return fresh ?: last
     }
 
-    private fun cityName(lat: Double, lon: Double): String? = try {
+    private fun cityName(lat: Double, lon: Double): Triple<String, String, String>? = try {
         if (!Geocoder.isPresent()) null else {
             @Suppress("DEPRECATION")
             val list = Geocoder(app, Locale.ITALY).getFromLocation(lat, lon, 1)
             val a = list?.firstOrNull()
-            a?.locality ?: a?.subAdminArea ?: a?.adminArea
+            val n = a?.locality ?: a?.subAdminArea
+            if (n == null) null else Triple(n, a.adminArea ?: "", a.countryCode?.lowercase() ?: "")
         }
     } catch (e: Exception) { null }
 }

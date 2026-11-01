@@ -39,6 +39,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         AppState.init(this)
+        Notify.createChannels(this)
+        Background.schedule(this)
         setContent { Root() }
     }
 
@@ -58,6 +60,15 @@ fun Root() {
         val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             AppState.locate()
             AppState.refreshAll()
+        }
+        val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+        LaunchedEffect(Unit) {
+            val anyNotif = s.notifAlerts || s.notifRain || s.notifMorning || s.notifStatus
+            val sp = AppState.app.getSharedPreferences("mlmeteo_notif", android.content.Context.MODE_PRIVATE)
+            if (anyNotif && android.os.Build.VERSION.SDK_INT >= 33 && !Notify.canPost(AppState.app) && !sp.getBoolean("asked", false)) {
+                sp.edit().putBoolean("asked", true).apply()
+                notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
         LaunchedEffect(Unit) {
             if (s.useGps && !AppState.hasLocationPermission(AppState.app)) {
