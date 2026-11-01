@@ -1,0 +1,35 @@
+name: Probe modelli HD
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Modelli
+        run: |
+          sudo apt-get install -y -qq libeccodes-tools > /dev/null 2>&1
+          L() { curl -sSL "$1" | sed 's/<[^>]*>/ /g' | tr -s ' ' | grep -v '^ *$' | head -${2:-15}; }
+          info() { grib_ls -p shortName,typeOfLevel,level,stepRange,packingType,gridType,Ni,Nj,bitsPerValue "$1" | sed -n 2,4p; grib_dump -O "$1" | grep -E "latitudeOfFirst|longitudeOfFirst|latitudeOfLast|longitudeOfLast|iDirectionIncrement |jDirectionIncrement |scanningMode" | head -7; }
+          echo "######## ICON-EU"
+          L https://opendata.dwd.de/weather/nwp/icon-eu/grib/ 12
+          L https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/tot_prec/ 6
+          F=$(curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/tot_prec/ | grep -o 'href="[^"]*regular-lat-lon[^"]*_006_[^"]*"' | head -1 | cut -d'"' -f2)
+          echo "file $F"; curl -sSL -o e.bz2 "https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/tot_prec/$F"; ls -la e.bz2; bunzip2 -f e.bz2; info e
+          curl -sSL https://opendata.dwd.de/weather/nwp/icon-eu/grib/12/ | grep -o 'href="[a-z_0-9]*/"' | tr '\n' ' '; echo
+          echo "######## ICON-D2"
+          F=$(curl -sSL https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/tot_prec/ | grep -o 'href="[^"]*regular-lat-lon[^"]*_006_[^"]*"' | head -1 | cut -d'"' -f2)
+          echo "file $F"; curl -sSL -o d.bz2 "https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/tot_prec/$F"; ls -la d.bz2; bunzip2 -f d.bz2; info d
+          curl -sSL https://opendata.dwd.de/weather/nwp/icon-d2/grib/12/ | grep -o 'href="[a-z_0-9]*/"' | tr '\n' ' '; echo
+          echo "######## ECMWF"
+          D=$(date -u +%Y%m%d)
+          L https://data.ecmwf.int/forecasts/$D/00z/ 10
+          L https://data.ecmwf.int/forecasts/$D/00z/ifs/ 10
+          for R in 0p1 0p25; do
+            I="https://data.ecmwf.int/forecasts/$D/00z/ifs/$R/oper/${D}000000-6h-oper-fc.index"
+            echo "== $R"; curl -sS "$I" | head -3; curl -sS "$I" | grep -c . 
+            curl -sS "$I" | grep '"param": "tp"' | head -1
+            O=$(curl -sS "$I" | grep '"param": "tp"' | head -1 | python3 -c "import json,sys;d=json.loads(sys.stdin.read());print(d['_offset'],d['_length'])")
+            set -- $O
+            [ -n "$1" ] && curl -sS -r $1-$(($1+$2-1)) -o x.grib "https://data.ecmwf.int/forecasts/$D/00z/ifs/$R/oper/${D}000000-6h-oper-fc.grib2" && info x.grib
+            curl -sS "$I" | python3 -c "import json,sys;print(sorted(set(json.loads(l)['param'] for l in sys.stdin if l.strip())))"
+          done
