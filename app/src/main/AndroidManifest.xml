@@ -71,6 +71,9 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_large" />
         </receiver>
+        <receiver
+            android:name=".WidgetRefreshReceiver"
+            android:exported="false" />
         <!-- Aggiornamenti in app: l'APK scaricato viene passato all'installatore -->
         <provider
             android:name="androidx.core.content.FileProvider"

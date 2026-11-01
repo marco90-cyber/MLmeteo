@@ -104,24 +104,74 @@ object Widgets {
     /** Località usate dai widget (per aggiornarle in background). */
     fun placeIds(ctx: Context): List<String> = allIds(ctx).mapNotNull { placeFor(ctx, it)?.id }
 
+    const val ACTION_REFRESH = "com.marco.mlmeteo.WIDGET_REFRESH"
+
+    /** Tocco sull'icona di aggiornamento: scarica subito i dati e ridisegna i widget. */
+    fun refreshNow(ctx: Context) {
+        ctx.getSharedPreferences("mlmeteo_widgets", Context.MODE_PRIVATE).edit()
+            .putLong("refreshing", System.currentTimeMillis()).apply()
+        updateAll(ctx)
+        androidx.work.WorkManager.getInstance(ctx).enqueueUniqueWork(
+            "mlmeteo-widget-refresh", androidx.work.ExistingWorkPolicy.REPLACE,
+            androidx.work.OneTimeWorkRequestBuilder<UpdateWorker>()
+                .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                .build(),
+        )
+    }
+
+    fun refreshDone(ctx: Context) {
+        ctx.getSharedPreferences("mlmeteo_widgets", Context.MODE_PRIVATE).edit().remove("refreshing").apply()
+    }
+
+    private fun refreshing(ctx: Context): Boolean {
+        val t = ctx.getSharedPreferences("mlmeteo_widgets", Context.MODE_PRIVATE).getLong("refreshing", 0)
+        return System.currentTimeMillis() - t < 60_000
+    }
+
+    /** Dimensioni reali del widget in dp (cambiano quando lo ridimensioni). */
+    private fun sizeDp(ctx: Context, m: AppWidgetManager, id: Int, kind: WidgetKind): Pair<Int, Int> {
+        val opts = m.getAppWidgetOptions(id)
+        val portrait = ctx.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        if (Build.VERSION.SDK_INT >= 31) {
+            @Suppress("DEPRECATION")
+            val sizes = opts.getParcelableArrayList<android.util.SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+            if (!sizes.isNullOrEmpty()) {
+                // in verticale la misura più stretta e alta, in orizzontale la più larga
+                val sz = if (portrait) sizes.minByOrNull { it.width }!! else sizes.maxByOrNull { it.width }!!
+                if (sz.width > 0 && sz.height > 0) return sz.width.toInt() to sz.height.toInt()
+            }
+        }
+        var w = if (portrait) opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) else opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)
+        var h = if (portrait) opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) else opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
+        if (w <= 0) w = when (kind) { WidgetKind.SMALL -> 180; else -> 320 }
+        if (h <= 0) h = when (kind) { WidgetKind.SMALL -> 90; WidgetKind.MEDIUM -> 180; WidgetKind.LARGE -> 360 }
+        return w to h
+    }
+
     fun update(ctx: Context, m: AppWidgetManager, id: Int, kind: WidgetKind) {
         try {
-            val opts = m.getAppWidgetOptions(id)
-            val portrait = ctx.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-            var wDp = if (portrait) opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) else opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)
-            var hDp = if (portrait) opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) else opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
-            if (wDp <= 0) wDp = when (kind) { WidgetKind.SMALL -> 180; else -> 320 }
-            if (hDp <= 0) hDp = when (kind) { WidgetKind.SMALL -> 90; WidgetKind.MEDIUM -> 180; WidgetKind.LARGE -> 360 }
+            val (wDp, hDp) = sizeDp(ctx, m, id, kind)
             val place = placeFor(ctx, id)
             val f = place?.let { ForecastStore.load(ctx, it.id) }
-            val bmp = draw(ctx, kind, wDp, hDp, place, f)
+            val s = Prefs.loadSettings(ctx)
+            val c = colors(ctx, s)
+            val busy = refreshing(ctx)
+            val bmp = draw(ctx, wDp, hDp, place, f, busy)
             val rv = RemoteViews(ctx.packageName, R.layout.widget_image)
             rv.setImageViewBitmap(R.id.widget_image, bmp)
-            val pi = PendingIntent.getActivity(
+            val open = PendingIntent.getActivity(
                 ctx, id, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
-            rv.setOnClickPendingIntent(R.id.widget_image, pi)
+            rv.setOnClickPendingIntent(R.id.widget_image, open)
+            // icona per aggiornare (nascosta se il widget è minuscolo)
+            val refresh = PendingIntent.getBroadcast(
+                ctx, 10_000 + id, Intent(ctx, WidgetRefreshReceiver::class.java).setAction(ACTION_REFRESH),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            rv.setOnClickPendingIntent(R.id.widget_refresh, refresh)
+            rv.setInt(R.id.widget_refresh, "setColorFilter", (if (busy) c.accent else c.inkDim).toArgb())
+            rv.setViewVisibility(R.id.widget_refresh, if (wDp >= 140 && hDp >= 56) android.view.View.VISIBLE else android.view.View.GONE)
             m.updateAppWidget(id, rv)
         } catch (e: Exception) { }
     }
@@ -144,12 +194,15 @@ object Widgets {
         return ib
     }
 
-    fun draw(ctx: Context, kind: WidgetKind, wDp: Int, hDp: Int, place: Place?, f: Forecast?): Bitmap {
+    /**
+     * Disegna il widget adattandosi alla grandezza:
+     * basso → solo temperatura; medio → anche le prossime ore; alto → anche i prossimi giorni.
+     */
+    fun draw(ctx: Context, wDp: Int, hDp: Int, place: Place?, f: Forecast?, busy: Boolean = false): Bitmap {
         val s = Prefs.loadSettings(ctx)
         val c = colors(ctx, s)
         val fmt = Fmt(s)
         val dens = ctx.resources.displayMetrics.density
-        // limite di memoria per le immagini dei widget
         var scale = dens
         while (wDp * scale * hDp * scale > 1_400_000) scale *= 0.85f
         val w = (wDp * scale).toInt().coerceAtLeast(10)
@@ -163,91 +216,137 @@ object Widgets {
             textSize = dp(size); this.color = color.toArgb(); textAlign = align
             typeface = Typeface.create(Typeface.DEFAULT, if (bold) Typeface.BOLD else Typeface.NORMAL)
         }
-        val pad = dp(16f)
+        fun fit(p: Paint, t: String, maxW: Float): String {
+            if (p.measureText(t) <= maxW) return t
+            var x = t
+            while (x.length > 1 && p.measureText("$x…") > maxW) x = x.dropLast(1)
+            return "$x…"
+        }
+        val pad = dp(if (hDp < 90) 12f else 16f)
+        val refreshSpace = if (wDp >= 140 && hDp >= 56) dp(40f) else 0f
         if (place == null || f == null) {
             cv.drawText("MLMeteo", pad, pad + dp(18f), text(18f, c.ink, true))
-            cv.drawText(if (place == null) "Aggiungi una località nell'app" else "Apri l'app per scaricare il meteo", pad, pad + dp(42f), text(13f, c.inkDim))
+            val msg = if (place == null) "Aggiungi una località nell'app" else if (busy) "Aggiornamento…" else "Tocca ⟳ o apri l'app"
+            cv.drawText(fit(text(13f, c.inkDim), msg, w - pad * 2), pad, pad + dp(40f), text(13f, c.inkDim))
             return bmp
         }
         val cur = f.current
         val today = f.days.firstOrNull()
-        when (kind) {
-            WidgetKind.SMALL -> {
-                val ic = (h - pad * 2).coerceAtMost(w * 0.4f).toInt()
-                cv.drawBitmap(icon(cur.code, cur.isDay, ic, s.iconSet, c), pad, (h - ic) / 2f, null)
-                val x = pad + ic + dp(10f)
-                val tp = text((h / scale * 0.36f).coerceIn(22f, 46f), c.ink, true)
-                cv.drawText(fmt.temp(cur.temp), x, h / 2f + tp.textSize * 0.15f, tp)
-                cv.drawText(place.name, x, h / 2f + tp.textSize * 0.15f + dp(18f), text(12f, c.inkDim))
+        val upd = Instant.ofEpochMilli(f.fetchedAt).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        val updTxt = if (busy) "Aggiornamento…" else "Agg. ${fmt.time(upd)}"
+
+        // --- piccolo (altezza sotto i 110 dp): una riga sola
+        if (hDp < 110) {
+            val ic = (h - pad * 2).coerceAtMost(dp(64f)).toInt()
+            cv.drawBitmap(icon(cur.code, cur.isDay, ic, s.iconSet, c), pad, (h - ic) / 2f, null)
+            var x = pad + ic + dp(10f)
+            val tSize = (hDp * 0.42f).coerceIn(22f, 44f)
+            val tp = text(tSize, c.ink, true)
+            val temp = fmt.temp(cur.temp)
+            val base = h / 2f + dp(tSize * 0.35f)
+            cv.drawText(temp, x, base, tp)
+            x += tp.measureText(temp) + dp(10f)
+            val avail = w - x - pad - refreshSpace
+            if (avail > dp(60f)) {
+                val nameP = text(13f, c.ink, true)
+                cv.drawText(fit(nameP, place.name, avail), x, base - dp(tSize * 0.45f), nameP)
+                val sub = if (wDp >= 240) "${conditionText(cur.code, cur.isDay)} · ${fmt.temp(today?.tMax ?: Double.NaN)}/${fmt.temp(today?.tMin ?: Double.NaN)}"
+                    else conditionText(cur.code, cur.isDay)
+                cv.drawText(fit(text(12f, c.inkDim), sub, avail), x, base, text(12f, c.inkDim))
             }
-            WidgetKind.MEDIUM, WidgetKind.LARGE -> {
-                var y = pad + dp(16f)
-                cv.drawText(place.name, pad, y, text(16f, c.ink, true))
-                val upd = Instant.ofEpochMilli(f.fetchedAt).atZone(ZoneId.systemDefault()).toLocalDateTime()
-                cv.drawText("Agg. ${fmt.time(upd)}", w - pad, y, text(11f, c.inkDim, align = Paint.Align.RIGHT))
-                y += dp(10f)
-                val ic = dp(64f).toInt()
-                cv.drawBitmap(icon(cur.code, cur.isDay, ic, s.iconSet, c), pad, y, null)
-                val tp = text(44f, c.ink, true)
-                cv.drawText(fmt.temp(cur.temp), pad + ic + dp(12f), y + dp(44f), tp)
-                val tx = pad + ic + dp(12f) + tp.measureText(fmt.temp(cur.temp)) + dp(14f)
-                cv.drawText(conditionText(cur.code, cur.isDay), tx, y + dp(26f), text(14f, c.ink))
-                cv.drawText("Max ${fmt.temp(today?.tMax ?: Double.NaN)} · Min ${fmt.temp(today?.tMin ?: Double.NaN)}", tx, y + dp(46f), text(12f, c.inkDim))
-                y += ic + dp(10f)
-                // ore
-                val n = ((w - pad * 2) / dp(52f)).toInt().coerceIn(3, 8)
-                val colW = (w - pad * 2) / n
-                val hoursH = dp(78f)
-                if (y + hoursH <= h - dp(6f)) {
-                    f.hours.take(n).forEachIndexed { i, hr ->
-                        val cx = pad + colW * i + colW / 2
-                        if (i == 0) {
-                            val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accentContainer.toArgb() }
-                            cv.drawRoundRect(RectF(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hoursH), dp(20f), dp(20f), chip)
-                        }
-                        val ink = if (i == 0) c.onAccentContainer else c.ink
-                        cv.drawText(if (i == 0) "Ora" else fmt.hourLabel(hr.time), cx, y + dp(16f), text(11f, if (i == 0) ink else c.inkDim, align = Paint.Align.CENTER))
-                        val hi = dp(26f).toInt()
-                        cv.drawBitmap(icon(hr.code, hr.isDay, hi, s.iconSet, c), cx - hi / 2f, y + dp(22f), null)
-                        cv.drawText(fmt.temp(if (i == 0) cur.temp else hr.temp), cx, y + dp(66f), text(13f, ink, true, Paint.Align.CENTER))
-                    }
-                    y += hoursH + dp(10f)
+            if (refreshSpace > 0 && wDp >= 200) cv.drawText(updTxt, w - pad, h - dp(10f), text(10f, c.inkDim, align = Paint.Align.RIGHT))
+            return bmp
+        }
+
+        // --- intestazione
+        var y = pad + dp(16f)
+        val nameP = text(16f, c.ink, true)
+        cv.drawText(fit(nameP, place.name, w - pad * 2 - refreshSpace), pad, y, nameP)
+        y += dp(16f)
+        cv.drawText(updTxt, pad, y, text(11f, c.inkDim))
+        y += dp(8f)
+        val ic = (if (hDp < 160) dp(52f) else dp(64f)).toInt()
+        cv.drawBitmap(icon(cur.code, cur.isDay, ic, s.iconSet, c), pad, y, null)
+        val tp = text(if (hDp < 160) 36f else 44f, c.ink, true)
+        val tX = pad + ic + dp(12f)
+        cv.drawText(fmt.temp(cur.temp), tX, y + ic * 0.72f, tp)
+        val tx = tX + tp.measureText(fmt.temp(cur.temp)) + dp(14f)
+        val availR = w - tx - pad
+        if (availR > dp(70f)) {
+            cv.drawText(fit(text(14f, c.ink), conditionText(cur.code, cur.isDay), availR), tx, y + ic * 0.42f, text(14f, c.ink))
+            cv.drawText(fit(text(12f, c.inkDim), "Max ${fmt.temp(today?.tMax ?: Double.NaN)} · Min ${fmt.temp(today?.tMin ?: Double.NaN)}", availR),
+                tx, y + ic * 0.72f, text(12f, c.inkDim))
+        }
+        y += ic + dp(10f)
+
+        // --- prossime ore (se c'è spazio)
+        val hoursH = dp(78f)
+        if (y + hoursH <= h - dp(6f)) {
+            val n = ((w - pad * 2) / dp(52f)).toInt().coerceIn(3, 10)
+            val colW = (w - pad * 2) / n
+            f.hours.take(n).forEachIndexed { i, hr ->
+                val cx = pad + colW * i + colW / 2
+                if (i == 0) {
+                    val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accentContainer.toArgb() }
+                    cv.drawRoundRect(RectF(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hoursH), dp(20f), dp(20f), chip)
                 }
-                if (kind == WidgetKind.LARGE) {
-                    val days = f.days.take(7)
-                    val lo = days.minOfOrNull { it.tMin } ?: 0.0
-                    val hi = days.maxOfOrNull { it.tMax } ?: 1.0
-                    val span = (hi - lo).coerceAtLeast(1.0)
-                    val rowH = dp(30f)
-                    val todayDate = f.localNow.toLocalDate()
-                    for (d in days) {
-                        if (y + rowH > h - dp(4f)) break
-                        val name = when (d.date) {
-                            todayDate -> "Oggi"
-                            todayDate.plusDays(1) -> "Domani"
-                            else -> d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ITALY).replaceFirstChar { it.uppercase() }
-                        }
-                        cv.drawText(name, pad, y + dp(20f), text(13f, c.ink))
-                        val di = dp(22f).toInt()
-                        cv.drawBitmap(icon(d.code, true, di, s.iconSet, c), pad + dp(64f), y + dp(4f), null)
-                        val rain = fmt.rainShort(d.precipProb, d.precipSum)
-                        cv.drawText(rain, pad + dp(92f), y + dp(20f), text(11f, c.accent, true))
-                        val bx0 = pad + dp(148f); val bx1 = w - pad - dp(36f)
-                        cv.drawText(fmt.temp(d.tMin), bx0 - dp(6f), y + dp(20f), text(12f, c.inkDim, align = Paint.Align.RIGHT))
-                        val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.outline.toArgb() }
-                        val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accent.toArgb() }
-                        val by = y + dp(13f)
+                val ink = if (i == 0) c.onAccentContainer else c.ink
+                cv.drawText(if (i == 0) "Ora" else fmt.hourLabel(hr.time), cx, y + dp(16f), text(11f, if (i == 0) ink else c.inkDim, align = Paint.Align.CENTER))
+                val hi = dp(26f).toInt()
+                cv.drawBitmap(icon(hr.code, hr.isDay, hi, s.iconSet, c), cx - hi / 2f, y + dp(22f), null)
+                cv.drawText(fmt.temp(if (i == 0) cur.temp else hr.temp), cx, y + dp(66f), text(13f, ink, true, Paint.Align.CENTER))
+            }
+            y += hoursH + dp(10f)
+        }
+
+        // --- prossimi giorni (quanti ne entrano)
+        val rowH = dp(30f)
+        if (y + rowH <= h - dp(4f)) {
+            val days = f.days.take(16)
+            val shown = ((h - dp(4f) - y) / rowH).toInt().coerceIn(0, days.size)
+            val list = days.take(shown)
+            val lo = list.minOfOrNull { it.tMin } ?: 0.0
+            val hi = list.maxOfOrNull { it.tMax } ?: 1.0
+            val span = (hi - lo).coerceAtLeast(1.0)
+            val todayDate = f.localNow.toLocalDate()
+            val showBar = wDp >= 250
+            for (d in list) {
+                val name = when (d.date) {
+                    todayDate -> "Oggi"
+                    todayDate.plusDays(1) -> "Domani"
+                    else -> d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ITALY).replaceFirstChar { it.uppercase() } + " ${d.date.dayOfMonth}"
+                }
+                cv.drawText(name, pad, y + dp(20f), text(13f, c.ink))
+                val di = dp(22f).toInt()
+                cv.drawBitmap(icon(d.code, true, di, s.iconSet, c), pad + dp(68f), y + dp(4f), null)
+                cv.drawText(fmt.rainShort(d.precipProb, d.precipSum), pad + dp(96f), y + dp(20f), text(11f, c.accent, true))
+                if (showBar) {
+                    val bx0 = pad + dp(152f); val bx1 = w - pad - dp(36f)
+                    cv.drawText(fmt.temp(d.tMin), bx0 - dp(6f), y + dp(20f), text(12f, c.inkDim, align = Paint.Align.RIGHT))
+                    val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.outline.toArgb() }
+                    val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accent.toArgb() }
+                    val by = y + dp(13f)
+                    if (bx1 > bx0 + dp(20f)) {
                         cv.drawRoundRect(RectF(bx0 + dp(4f), by, bx1, by + dp(5f)), dp(3f), dp(3f), track)
                         val x0 = bx0 + dp(4f) + ((d.tMin - lo) / span * (bx1 - bx0 - dp(4f))).toFloat()
                         val x1 = bx0 + dp(4f) + ((d.tMax - lo) / span * (bx1 - bx0 - dp(4f))).toFloat()
                         cv.drawRoundRect(RectF(x0, by, x1.coerceAtLeast(x0 + dp(5f)), by + dp(5f)), dp(3f), dp(3f), bar)
-                        cv.drawText(fmt.temp(d.tMax), w - pad, y + dp(20f), text(13f, c.ink, true, Paint.Align.RIGHT))
-                        y += rowH
                     }
+                } else {
+                    cv.drawText(fmt.temp(d.tMin), w - pad - dp(40f), y + dp(20f), text(12f, c.inkDim, align = Paint.Align.RIGHT))
                 }
+                cv.drawText(fmt.temp(d.tMax), w - pad, y + dp(20f), text(13f, c.ink, true, Paint.Align.RIGHT))
+                y += rowH
             }
         }
         return bmp
+    }
+}
+
+/** Riceve il tocco sull'icona di aggiornamento dei widget. */
+class WidgetRefreshReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Widgets.ACTION_REFRESH) Widgets.refreshNow(context)
     }
 }
 

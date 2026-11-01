@@ -82,6 +82,7 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 if (p.id == main.id) Notify.statusBar(ctx, p, f, s)
             } catch (e: Exception) { }
         }
+        Widgets.refreshDone(ctx)
         Widgets.updateAll(ctx)
         if (s.notifAlerts) try { Notify.alerts(ctx, main, AlertsRepo.forPlace(main, force = true), s) } catch (e: Exception) { }
         if (s.notifRain) try { Notify.rainSoon(ctx, main, s) } catch (e: Exception) { }
