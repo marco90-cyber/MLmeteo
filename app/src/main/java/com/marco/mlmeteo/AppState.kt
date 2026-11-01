@@ -54,6 +54,9 @@ object AppState {
         Icon2i.cacheDir = app.cacheDir
         Wrf.cacheDir = app.cacheDir
         Gfs.cacheDir = app.cacheDir
+        IconEu.m.cacheDir = app.cacheDir
+        IconD2.m.cacheDir = app.cacheDir
+        Ecmwf.cacheDir = app.cacheDir
         AlertsRepo.cacheDir = app.cacheDir
         settings = Prefs.loadSettings(app)
         savedPlaces = Prefs.loadPlaces(app)

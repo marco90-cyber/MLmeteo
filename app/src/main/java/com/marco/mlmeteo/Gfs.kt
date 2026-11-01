@@ -39,7 +39,9 @@ object Gfs {
 
     lateinit var cacheDir: File
 
-    val layers = listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.VIS)
+    val layers = listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD,
+        MapLayer.CLOUD_LOW, MapLayer.CLOUD_MID, MapLayer.CLOUD_HIGH, MapLayer.VIS,
+        MapLayer.PRESSURE, MapLayer.CAPE, MapLayer.T850, MapLayer.FREEZING, MapLayer.SNOW_DEPTH)
 
     class Data(val run: String, val times: List<LocalDateTime>, val values: List<FloatArray>, val u: List<FloatArray>? = null, val v: List<FloatArray>? = null)
 
@@ -77,7 +79,7 @@ object Gfs {
             b
         }
         val len = ByteBuffer.wrap(bytes, 8, 8).order(ByteOrder.BIG_ENDIAN).long.toInt().coerceAtMost(bytes.size)
-        val values = Icon2i.decode(bytes.copyOf(len)) ?: return null
+        val values = try { Grib.decode(bytes.copyOf(len)).values } catch (e: Exception) { return null }
         return if (values.size == NI * NJ) values else null
     }
 
@@ -93,6 +95,14 @@ object Gfs {
             MapLayer.GUST -> listOf("GUST" to "surface")
             MapLayer.CLOUD -> listOf("TCDC" to "entire_atmosphere")
             MapLayer.VIS -> listOf("VIS" to "surface")
+            MapLayer.CLOUD_LOW -> listOf("LCDC" to "low_cloud_layer")
+            MapLayer.CLOUD_MID -> listOf("MCDC" to "middle_cloud_layer")
+            MapLayer.CLOUD_HIGH -> listOf("HCDC" to "high_cloud_layer")
+            MapLayer.PRESSURE -> listOf("PRMSL" to "mean_sea_level")
+            MapLayer.CAPE -> listOf("CAPE" to "surface")
+            MapLayer.T850 -> listOf("TMP" to "850_mb")
+            MapLayer.FREEZING -> listOf("HGT" to "0C_isotherm")
+            MapLayer.SNOW_DEPTH -> listOf("SNOD" to "surface")
             else -> throw IOException("Strato non disponibile con GFS")
         }
         val nowUtc = ZonedDateTime.now(ZoneOffset.UTC)
@@ -136,7 +146,9 @@ object Gfs {
                 val runId = run.format(DateTimeFormatter.ofPattern("yyyyMMddHH"))
                 val data = when (layer) {
                     MapLayer.RAIN -> Data(runId, times, ok.map { st -> out["0/$st"]!!.let { a -> FloatArray(a.size) { a[it] * 3600f } } })
-                    MapLayer.TEMP -> Data(runId, times, ok.map { st -> out["0/$st"]!!.let { a -> FloatArray(a.size) { a[it] - 273.15f } } })
+                    MapLayer.PRESSURE -> Data(runId, times, ok.map { st -> out["0/$st"]!!.let { a -> FloatArray(a.size) { a[it] / 100f } } })
+                    MapLayer.SNOW_DEPTH -> Data(runId, times, ok.map { st -> out["0/$st"]!!.let { a -> FloatArray(a.size) { a[it] * 100f } } })
+                    MapLayer.TEMP, MapLayer.T850 -> Data(runId, times, ok.map { st -> out["0/$st"]!!.let { a -> FloatArray(a.size) { a[it] - 273.15f } } })
                     MapLayer.WIND -> Data(runId, times, emptyList(),
                         ok.map { st -> out["0/$st"]!!.let { a -> FloatArray(a.size) { a[it] * 3.6f } } },
                         ok.map { st -> out["1/$st"]!!.let { a -> FloatArray(a.size) { a[it] * 3.6f } } })
@@ -177,24 +189,20 @@ object Gfs {
         val vals = if (wind) null else d.values.getOrNull(k) ?: return null
         val us = if (wind) d.u?.getOrNull(k) ?: return null else null
         val vs = if (wind) d.v?.getOrNull(k) ?: return null else null
-        val stops = layer.stops
-        val lo = stops.first().first
-        val hi = stops.last().first
-        val lut = IntArray(512) { i -> colorAt(lo + (hi - lo) * i / 511.0, stops).toArgb() }
         val h = OUT_H
-        val px = IntArray(OUT_W * h)
+        val vv = FloatArray(OUT_W * h)
         val y0 = latToY(NORTH); val y1 = latToY(SOUTH)
         val lons = DoubleArray(OUT_W) { i -> WEST + (EAST - WEST) * (i + 0.5) / OUT_W }
         for (j in 0 until h) {
             val lat = yToLat(y0 + (j + 0.5) / h * (y1 - y0))
             for (i in 0 until OUT_W) {
-                val v = if (wind) {
+                vv[j * OUT_W + i] = if (wind) {
                     val a = sample(us!!, lat, lons[i]); val b = sample(vs!!, lat, lons[i])
                     sqrt(a * a + b * b)
                 } else sample(vals!!, lat, lons[i])
-                px[j * OUT_W + i] = if (v.isNaN() || v < lo) 0 else lut[(((v - lo) / (hi - lo)) * 511).toInt().coerceIn(0, 511)]
             }
         }
+        val px = Paint.pixels(vv, OUT_W, h, layer)
         return Bitmap.createBitmap(px, OUT_W, h, Bitmap.Config.ARGB_8888).asImageBitmap()
     }
 }

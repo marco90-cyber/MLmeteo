@@ -76,9 +76,13 @@ object Wrf {
     private fun fileUrl(run: String, variable: String): String? {
         val key = "$run/$variable"
         fileNames[key]?.let { return it }
-        val html = try { Net.get("$BASE/$run/$variable/") } catch (e: Exception) { return null }
-        val name = Regex("href=\"([^\"]+\\.grib)\"").find(html)?.groupValues?.get(1) ?: return null
-        return "$BASE/$run/$variable/$name".also { fileNames[key] = it }
+        // "t@850" = cartella t, file del livello 850 hPa
+        val dir = variable.substringBefore('@')
+        val lev = variable.substringAfter('@', "")
+        val html = try { Net.get("$BASE/$run/$dir/") } catch (e: Exception) { return null }
+        val names = Regex("href=\"([^\"]+\\.grib)\"").findAll(html).map { it.groupValues[1] }.toList()
+        val name = (if (lev.isEmpty()) names.firstOrNull() else names.firstOrNull { it.endsWith("isobaricInhPa-$lev.grib") }) ?: return null
+        return "$BASE/$run/$dir/$name".also { fileNames[key] = it }
     }
 
     private fun range(url: String, from: Long, len: Long): ByteArray {
@@ -292,7 +296,8 @@ object Wrf {
         return utc.atOffset(ZoneOffset.UTC).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
     }
 
-    val layers = listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.VIS)
+    val layers = listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.VIS,
+        MapLayer.PRESSURE, MapLayer.CAPE, MapLayer.T850)
 
     suspend fun load(layer: MapLayer, hours: Int, progress: (Int, Int) -> Unit): Data = coroutineScope {
         val vars = when (layer) {
@@ -302,6 +307,9 @@ object Wrf {
             MapLayer.GUST -> listOf("gust")
             MapLayer.CLOUD -> listOf("tcc")
             MapLayer.VIS -> listOf("vis")
+            MapLayer.PRESSURE -> listOf("prmsl")
+            MapLayer.CAPE -> listOf("cape")
+            MapLayer.T850 -> listOf("t@850")
             else -> throw IOException("Strato non disponibile con WRF")
         }
         val runList = withContext(Dispatchers.IO) { runs() }
@@ -327,7 +335,8 @@ object Wrf {
                             val bytes = messageBytes(url, s) ?: throw IOException("Dato mancante")
                             val dec = withContext(Dispatchers.Default) { decode(bytes) }
                             val tf: (Float) -> Float = when (layer) {
-                                MapLayer.TEMP -> { x -> x - 273.15f }
+                                MapLayer.TEMP, MapLayer.T850 -> { x -> x - 273.15f }
+                                MapLayer.PRESSURE -> { x -> x / 100f }
                                 MapLayer.WIND, MapLayer.GUST -> { x -> x * 3.6f }
                                 MapLayer.VIS -> { x -> x / 1000f } // km
                                 else -> { x -> x }
@@ -366,27 +375,21 @@ object Wrf {
     fun count(d: Data) = d.times.size
 
     fun render(d: Data, k: Int, layer: MapLayer): ImageBitmap? {
-        val stops = layer.stops
-        val lo = stops.first().first
-        val hi = stops.last().first
-        val lut = IntArray(512) { i -> colorAt(lo + (hi - lo) * i / 511.0, stops).toArgb() }
         val h = H
-        val px = IntArray(W * h)
         val wind = layer == MapLayer.WIND
         val vals = if (wind) null else d.values.getOrNull(k) ?: return null
         val us = if (wind) d.u?.getOrNull(k) ?: return null else null
         val vs = if (wind) d.v?.getOrNull(k) ?: return null else null
-        for (p in px.indices) {
-            val value: Double = if (wind) {
+        val out = FloatArray(W * h) { p ->
+            if (wind) {
                 val a = us!![p]; val b = vs!![p]
-                if (a == NODATA) Double.NaN else sqrt((a * a + b * b).toDouble()) / 10.0
+                if (a == NODATA) Float.NaN else (sqrt((a * a + b * b).toDouble()) / 10.0).toFloat()
             } else {
                 val a = vals!![p]
-                if (a == NODATA) Double.NaN else a / 10.0
+                if (a == NODATA) Float.NaN else a / 10f
             }
-            px[p] = if (value.isNaN() || value < lo) 0 else lut[(((value - lo) / (hi - lo)) * 511).toInt().coerceIn(0, 511)]
         }
-        return Bitmap.createBitmap(px, W, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+        return Paint.bitmap(out, W, h, layer)
     }
 
     /** Vento (u, v in km/h) nel pixel della griglia di uscita più vicino a (lat, lon). */

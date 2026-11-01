@@ -109,7 +109,25 @@ enum class MapLayer(val key: String?, val label: String, val unit: String) {
     CLOUD("cloud_cover", "Nuvole", "%"),
     SNOW("snowfall", "Neve", "cm/h"),
     LPI(null, "Fulmini previsti", "J/kg"),
-    VIS(null, "Nebbia", "km");
+    VIS(null, "Nebbia", "km"),
+    PRESSURE(null, "Isobare", "hPa"),
+    CAPE(null, "Instabilità (CAPE)", "J/kg"),
+    T850(null, "Temp. 850 hPa", "°C"),
+    CLOUD_LOW(null, "Nuvole basse", "%"),
+    CLOUD_MID(null, "Nuvole medie", "%"),
+    CLOUD_HIGH(null, "Nuvole alte", "%"),
+    FREEZING(null, "Zero termico", "m"),
+    SNOWLINE(null, "Quota neve", "m"),
+    SNOW_DEPTH(null, "Neve al suolo", "cm"),
+    DBZ(null, "Radar simulato", "dBZ");
+
+    /** Distanza tra le linee di livello (0 = nessuna linea). */
+    val contour: Double
+        get() = when (this) {
+            PRESSURE -> 4.0
+            T850 -> 4.0
+            else -> 0.0
+        }
 
     val stops: List<Pair<Double, Color>>
         get() = when (this) {
@@ -141,6 +159,36 @@ enum class MapLayer(val key: String?, val label: String, val unit: String) {
             )
             // visibilità: più è bassa, più la nebbia è fitta
             VIS -> listOf(0.0 to Color(0xEE8E8E99), 1.0 to Color(0xCCB0B0BA), 3.0 to Color(0x88D0D0D8), 8.0 to Color(0x33E8E8EE), 10.0 to Color(0x00FFFFFF))
+            PRESSURE -> listOf(
+                950.0 to Color(0x996A1B9A), 990.0 to Color(0x773949AB), 1005.0 to Color(0x5542A5F5), 1013.0 to Color(0x3366BB6A),
+                1020.0 to Color(0x55FFEE58), 1030.0 to Color(0x77FF9800), 1045.0 to Color(0x99E53935),
+            )
+            CAPE -> listOf(
+                100.0 to Color(0x0066BB6A), 300.0 to Color(0x8866BB6A), 800.0 to Color(0xAAFFEE58), 1500.0 to Color(0xCCFF9800),
+                2500.0 to Color(0xDDE53935), 4000.0 to Color(0xEE9C27B0),
+            )
+            T850 -> listOf(
+                -30.0 to Color(0xAA4A148C), -20.0 to Color(0xAA5E35B1), -10.0 to Color(0xAA3F51B5), 0.0 to Color(0xAA42A5F5),
+                8.0 to Color(0xAA66BB6A), 16.0 to Color(0xAAFFEE58), 24.0 to Color(0xAAFF7043), 32.0 to Color(0xAAB71C1C),
+            )
+            CLOUD_LOW, CLOUD_MID, CLOUD_HIGH -> listOf(5.0 to Color(0x00FFFFFF), 30.0 to Color(0x44FFFFFF), 70.0 to Color(0x99E0E0E0), 100.0 to Color(0xCCF5F5F5))
+            FREEZING -> listOf(
+                0.0 to Color(0xBB4A148C), 500.0 to Color(0xAA3F51B5), 1000.0 to Color(0xAA42A5F5), 1500.0 to Color(0xAA26C6DA),
+                2000.0 to Color(0xAA66BB6A), 2500.0 to Color(0xAAD4E157), 3000.0 to Color(0xAAFFEE58), 3500.0 to Color(0xAAFF9800),
+                4500.0 to Color(0xAAE53935),
+            )
+            SNOWLINE -> listOf(
+                -1.0 to Color(0xBB4A148C), 300.0 to Color(0xAA3F51B5), 700.0 to Color(0xAA42A5F5), 1200.0 to Color(0xAA26C6DA),
+                1700.0 to Color(0xAA66BB6A), 2300.0 to Color(0xAAFFEE58), 3000.0 to Color(0xAAFF9800), 4000.0 to Color(0xAAE53935),
+            )
+            SNOW_DEPTH -> listOf(
+                0.5 to Color(0x00E3F2FD), 2.0 to Color(0x99E3F2FD), 10.0 to Color(0xBB90CAF9), 30.0 to Color(0xCC7986CB),
+                80.0 to Color(0xDDAB47BC), 200.0 to Color(0xEE6A1B9A),
+            )
+            DBZ -> listOf(
+                10.0 to Color(0x009BE7FF), 15.0 to Color(0xAA9BE7FF), 20.0 to Color(0xCC00C8FF), 28.0 to Color(0xDD00B400),
+                36.0 to Color(0xEEFFFF00), 44.0 to Color(0xEEFF9600), 52.0 to Color(0xEEFF0000), 60.0 to Color(0xEEC800FF),
+            )
         }
 }
 
@@ -200,13 +248,31 @@ class HiRes(
 )
 
 fun layersFor(model: String): List<MapLayer> = when (model) {
-    "icon2i" -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.SNOW, MapLayer.LPI)
+    "icon2i" -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD,
+        MapLayer.CLOUD_LOW, MapLayer.CLOUD_MID, MapLayer.CLOUD_HIGH, MapLayer.SNOW, MapLayer.LPI,
+        MapLayer.PRESSURE, MapLayer.CAPE, MapLayer.T850, MapLayer.SNOWLINE, MapLayer.SNOW_DEPTH)
     "wrf" -> Wrf.layers
     "gfs" -> Gfs.layers
+    "iconeu" -> IconEu.m.layers
+    "icond2" -> IconD2.m.layers
+    "ecmwf" -> Ecmwf.layers
     else -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.SNOW)
 }
 
+/** Il modello copre questo punto? */
+fun modelCovers(model: String, lat: Double, lon: Double): Boolean = when (model) {
+    "wrf" -> Wrf.contains(lat, lon)
+    "gfs" -> lat in Gfs.SOUTH..Gfs.NORTH && lon in Gfs.WEST..Gfs.EAST
+    "iconeu" -> IconEu.m.contains(lat, lon)
+    "icond2" -> IconD2.m.contains(lat, lon)
+    "ecmwf" -> Ecmwf.contains(lat, lon)
+    else -> Icon2i.contains(lat, lon)
+}
+
 suspend fun loadHiRes(model: String, layer: MapLayer, hours: Int, progress: (Int, Int) -> Unit): HiRes = when (model) {
+    "iconeu" -> IconEu.m.load(layer, hours, progress).toHiRes(layer)
+    "icond2" -> IconD2.m.load(layer, hours.coerceAtMost(48), progress).toHiRes(layer)
+    "ecmwf" -> Ecmwf.load(layer, hours, progress).toHiRes(layer)
     "gfs" -> Gfs.load(layer, hours, progress).let { d ->
         HiRes(d.run, d.times, Gfs.NORTH, Gfs.SOUTH, Gfs.WEST, Gfs.EAST,
             render = { k, l -> Gfs.render(d, k, l) },
@@ -253,9 +319,18 @@ private enum class RadarMode { DPC, RAINVIEWER, MODEL }
 val MapModels = listOf(
     "icon2i" to "ICON-2I 2 km",
     "wrf" to "WRF 1,5 km",
-    "icon_seamless" to "ICON",
+    "icond2" to "ICON-D2 2 km",
+    "iconeu" to "ICON-EU 6 km",
+    "ecmwf" to "ECMWF HD",
     "gfs" to "GFS HD",
 )
+
+/** Ore massime di previsione per modello. */
+fun modelMaxHours(model: String) = when (model) {
+    "icon2i" -> 24
+    "icond2" -> 48
+    else -> 72
+}
 
 // ------------------------------------------------------------------ schermata Radar
 
@@ -330,7 +405,7 @@ fun RadarScreen() {
     var layer by remember { mutableStateOf(MapLayer.RAIN) }
     val model = s.radarModel
     // "isIcon2i" = modello ad alta risoluzione scaricato in app (ICON-2I o WRF)
-    val isIcon2i = model == "icon2i" || model == "wrf" || model == "gfs"
+    val isIcon2i = MapModels.any { it.first == model }
     if (layer !in layersFor(model)) layer = MapLayer.RAIN
 
     // modelli ad alta risoluzione (ICON-2I, WRF)
@@ -550,6 +625,9 @@ fun RadarScreen() {
                                 mode == RadarMode.RAINVIEWER -> "Radar RainViewer"
                                 model == "wrf" -> "Previsione WRF (1,5 km)"
                                 model == "gfs" -> "Previsione GFS HD (0,25°)"
+                                model == "iconeu" -> "Previsione ICON-EU (6,5 km)"
+                                model == "icond2" -> "Previsione ICON-D2 (2,2 km)"
+                                model == "ecmwf" -> "Previsione ECMWF HD (0,25°)"
                                 isIcon2i -> "Previsione ICON-2I (2,2 km)"
                                 else -> "Previsione " + (MapModels.firstOrNull { it.first == model }?.second ?: "")
                             },
@@ -591,9 +669,9 @@ fun RadarScreen() {
                             Pill(label, model == id) { playing = false; AppState.update { it.copy(radarModel = id) } }
                         }
                         if (isIcon2i) {
-                            val next = if (model == "wrf" || model == "gfs") when (s.icon2iHours) { 6 -> 12; 12 -> 24; 24 -> 48; 48 -> 72; else -> 6 }
-                                else when (s.icon2iHours) { 6 -> 12; 12 -> 24; else -> 6 }
-                            Pill("+${s.icon2iHours} h", false) { playing = false; AppState.update { it.copy(icon2iHours = next) } }
+                            val opts = listOf(6, 12, 24, 48, 72).filter { it <= modelMaxHours(model) }
+                            val next = opts.firstOrNull { it > s.icon2iHours } ?: opts.first()
+                            Pill("+${minOf(s.icon2iHours, modelMaxHours(model))} h", false) { playing = false; AppState.update { it.copy(icon2iHours = next) } }
                         }
                     }
                     Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -621,12 +699,9 @@ fun RadarScreen() {
                                 " · corsa ${d.run.substring(8)}:00 UTC"
                             else -> ""
                         }
-                        val covers = place == null || when (model) {
-                            "wrf" -> Wrf.contains(place.lat, place.lon)
-                            "gfs" -> place.lat in Gfs.SOUTH..Gfs.NORTH && place.lon in Gfs.WEST..Gfs.EAST
-                            else -> Icon2i.contains(place.lat, place.lon)
-                        }
-                        if (!covers && !i2Loading) label = "Questo modello copre solo l'Italia: scegli ICON o GFS HD"
+                        val covers = place == null || modelCovers(model, place.lat, place.lon)
+                        if (!covers && !i2Loading) label = if (model == "icond2") "ICON-D2 copre solo il Nord Italia: scegli un altro modello"
+                            else "Questo modello non copre la zona: scegli GFS HD"
                     }
                     mode == RadarMode.MODEL -> {
                         val g = grid
@@ -725,6 +800,8 @@ fun RadarScreen() {
                         mode == RadarMode.RAINVIEWER -> "Rain Viewer"
                         model == "wrf" -> "WRF: ItaliaMeteo"
                         model == "gfs" -> "GFS: NOAA"
+                        model == "iconeu" || model == "icond2" -> "ICON: Deutscher Wetterdienst"
+                        model == "ecmwf" -> "ECMWF open data (CC-BY 4.0)"
                         isIcon2i -> "ICON-2I: ItaliaMeteo / ARPAE"
                         else -> "Dati Open-Meteo"
                     } + if (showLightning) " · Fulmini: © EUMETSAT" else "",

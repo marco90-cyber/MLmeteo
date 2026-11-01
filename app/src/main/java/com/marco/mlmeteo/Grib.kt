@@ -247,23 +247,26 @@ object Grib {
 
     /** Ritaglia il campo sull'area richiesta (stesso passo della griglia originale). */
     fun crop(f: Field, south: Double, north: Double, west: Double, east: Double): Field {
-        val j0 = Math.floor((south - f.south) / f.dlat).toInt().coerceIn(0, f.nj - 1)
-        val j1 = Math.ceil((north - f.south) / f.dlat).toInt().coerceIn(0, f.nj - 1)
-        var w = west; var e = east
-        // griglie globali 0..360 o -180..180
-        val i0 = Math.floor(((w - f.west) % 360 + 360) % 360 / f.dlon).toInt()
-        val count = Math.ceil((e - w) / f.dlon).toInt() + 1
+        val j0 = Math.floor((south - f.south) / f.dlat + 1e-6).toInt().coerceIn(0, f.nj - 1)
+        val j1 = Math.ceil((north - f.south) / f.dlat - 1e-6).toInt().coerceIn(j0, f.nj - 1)
+        val global = f.dlon * f.ni >= 359.0
+        val off = if (global) ((west - f.west) % 360 + 360) % 360 else (west - f.west).coerceAtLeast(0.0)
+        val i0 = Math.floor(off / f.dlon + 1e-6).toInt().coerceIn(0, f.ni - 1)
+        var ni = Math.ceil((east - west) / f.dlon - 1e-6).toInt() + 1
+        if (!global) ni = ni.coerceAtMost(f.ni - i0)
+        ni = ni.coerceIn(1, f.ni)
         val nj = j1 - j0 + 1
-        val ni = count.coerceAtMost(f.ni)
         val out = FloatArray(ni * nj)
-        for (j in 0 until nj) for (i in 0 until ni) {
-            var si = i0 + i
-            if (si >= f.ni) si = if (f.dlon * f.ni >= 359.0) si - f.ni else f.ni - 1
-            out[j * ni + i] = f.values[(j0 + j) * f.ni + si]
+        for (j in 0 until nj) {
+            val src = (j0 + j) * f.ni
+            for (i in 0 until ni) {
+                var si = i0 + i
+                if (si >= f.ni) si -= f.ni
+                out[j * ni + i] = f.values[src + si]
+            }
         }
-        @Suppress("UNUSED_VALUE") run { w = f.west + i0 * f.dlon; e = w + (ni - 1) * f.dlon }
-        var westOut = f.west + i0 * f.dlon
-        if (westOut > 180) westOut -= 360
-        return Field(ni, nj, f.south + j0 * f.dlat, westOut, f.dlat, f.dlon, out)
+        var w = f.west + i0 * f.dlon
+        if (w >= 180) w -= 360
+        return Field(ni, nj, f.south + j0 * f.dlat, w, f.dlat, f.dlon, out)
     }
 }

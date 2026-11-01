@@ -70,9 +70,13 @@ object Icon2i {
     private fun fileUrl(run: String, variable: String): String? {
         val key = "$run/$variable"
         fileNames[key]?.let { return it }
-        val html = try { Net.get("$BASE/$run/$variable/") } catch (e: Exception) { return null }
-        val name = Regex("href=\"([^\"]+\\.grib)\"").find(html)?.groupValues?.get(1) ?: return null
-        val url = "$BASE/$run/$variable/$name"
+        // "T@850" = cartella T, file del livello 850 hPa
+        val dir = variable.substringBefore('@')
+        val lev = variable.substringAfter('@', "")
+        val html = try { Net.get("$BASE/$run/$dir/") } catch (e: Exception) { return null }
+        val names = Regex("href=\"([^\"]+\\.grib)\"").findAll(html).map { it.groupValues[1] }.toList()
+        val name = (if (lev.isEmpty()) names.firstOrNull() else names.firstOrNull { it.endsWith("isobaricInhPa-$lev.grib") }) ?: return null
+        val url = "$BASE/$run/$dir/$name"
         fileNames[key] = url
         return url
     }
@@ -118,7 +122,7 @@ object Icon2i {
             try { f.writeBytes(b) } catch (e: Exception) { }
             b
         }
-        return decode(bytes)
+        return try { Grib.decode(Grib.first(bytes)).values.takeIf { it.size == NI * NJ } } catch (e: Exception) { decode(bytes) }
     }
 
     /** Toglie dalla cache i file di corse vecchie. */
@@ -209,7 +213,15 @@ object Icon2i {
             MapLayer.CLOUD -> listOf("CLCT")
             MapLayer.SNOW -> listOf("SNOW_GSP", "SNOW_CON")
             MapLayer.LPI -> listOf("LPI")
-            MapLayer.VIS -> throw IOException("Nebbia non disponibile con ICON-2I")
+            MapLayer.PRESSURE -> listOf("PMSL")
+            MapLayer.CAPE -> listOf("CAPE_ML")
+            MapLayer.T850 -> listOf("T@850")
+            MapLayer.CLOUD_LOW -> listOf("CLCL")
+            MapLayer.CLOUD_MID -> listOf("CLCM")
+            MapLayer.CLOUD_HIGH -> listOf("CLCH")
+            MapLayer.SNOWLINE -> listOf("SNOWLMT")
+            MapLayer.SNOW_DEPTH -> listOf("H_SNOW")
+            else -> throw IOException("Strato non disponibile con ICON-2I")
         }
         val accumulated = layer == MapLayer.RAIN || layer == MapLayer.SNOW
         val runList = withContext(Dispatchers.IO) { runs() }
@@ -254,7 +266,10 @@ object Icon2i {
                             }
                             out
                         })
-                        MapLayer.TEMP -> Data(run, times, steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { a[it] - 273.15f } } })
+                        MapLayer.TEMP, MapLayer.T850 -> Data(run, times, steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { a[it] - 273.15f } } })
+                        MapLayer.PRESSURE -> Data(run, times, steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { a[it] / 100f } } })
+                        MapLayer.SNOW_DEPTH -> Data(run, times, steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { a[it] * 100f } } })
+                        MapLayer.SNOWLINE -> Data(run, times, steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { if (a[it] < 0) Float.NaN else a[it] } } })
                         MapLayer.WIND -> {
                             val us = steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { a[it] * 3.6f } } }
                             val vs = steps.map { s -> f(1, s).let { a -> FloatArray(a.size) { a[it] * 3.6f } } }
@@ -300,24 +315,10 @@ object Icon2i {
     }
 
     fun render(values: FloatArray, layer: MapLayer): ImageBitmap {
-        val stops = layer.stops
-        val lo = stops.first().first
-        val hi = stops.last().first
-        val lut = IntArray(512) { k ->
-            val v = lo + (hi - lo) * k / 511.0
-            colorAt(v, stops).toArgb()
-        }
-        val px = IntArray(NI * H)
         val rows = rowMap
-        for (j in 0 until H) {
-            val src = rows[j] * NI
-            val dst = j * NI
-            for (i in 0 until NI) {
-                val v = values[src + i]
-                px[dst + i] = if (v.isNaN() || v < lo) 0 else lut[(((v - lo) / (hi - lo)) * 511).toInt().coerceIn(0, 511)]
-            }
-        }
-        return Bitmap.createBitmap(px, NI, H, Bitmap.Config.ARGB_8888).asImageBitmap()
+        val out = FloatArray(NI * H)
+        for (j in 0 until H) System.arraycopy(values, rows[j] * NI, out, j * NI, NI)
+        return Paint.bitmap(out, NI, H, layer)
     }
 
     /** Valore nel punto (lat, lon), interpolato. */
