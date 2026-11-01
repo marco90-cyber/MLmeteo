@@ -5,29 +5,35 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: File precipitazione
+      - name: Variabili ICON-2I e fulmini
         run: |
-          B=https://meteohub.agenziaitaliameteo.it/nwp
-          R=$(curl -sSL $B/ICON_2I_RUC/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2 | tr -d /)
-          U="$B/ICON_2I_RUC/$R/TOT_PREC/ICON_2I_RUC_${R}_surface-0.grib"
-          echo "$U"
-          curl -sSI "$U" | grep -iE "accept-ranges|content-length|HTTP"
-          sudo apt-get install -y -qq libeccodes-tools > /dev/null
-          python3 - "$U" <<'PY'
+          sudo apt-get install -y -qq libeccodes-tools > /dev/null 2>&1
+          B=https://meteohub.agenziaitaliameteo.it/nwp/ICON_2I_RUC
+          R=$(curl -sSL $B/ | grep -o 'href="[0-9]*/"' | tail -1 | cut -d'"' -f2 | tr -d /)
+          echo "RUC $R"
+          for V in T_2M U_10M V_10M VMAX_10M CLCT SNOW_GSP SNOW_CON LPI TOT_PREC; do
+            F=$(curl -sSL $B/$R/$V/ | grep -o 'href="[^"]*grib"' | head -1 | cut -d'"' -f2)
+            echo "== $V $F"
+            U="$B/$R/$V/$F"
+            python3 - "$U" <<'PY'
           import sys, urllib.request, struct
-          u=sys.argv[1]; off=0; msgs=[]
-          while len(msgs)<80:
-              req=urllib.request.Request(u, headers={'Range':'bytes=%d-%d'%(off,off+15)})
-              try: b=urllib.request.urlopen(req).read()
-              except Exception as e: print('fine',e); break
+          u=sys.argv[1]; off=0; n=0; lens=[]
+          while n<40:
+              try: b=urllib.request.urlopen(urllib.request.Request(u, headers={'Range':'bytes=%d-%d'%(off,off+15)})).read()
+              except Exception: break
               if len(b)<16 or b[:4]!=b'GRIB': break
-              ln=struct.unpack('>Q',b[8:16])[0]; msgs.append((off,ln)); off+=ln
-          print('messaggi',len(msgs),'primi',msgs[:3])
-          o,l=msgs[1]
-          req=urllib.request.Request(u, headers={'Range':'bytes=%d-%d'%(o,o+l-1)}); open('m.grib','wb').write(urllib.request.urlopen(req).read())
-          o,l=msgs[-1]
-          req=urllib.request.Request(u, headers={'Range':'bytes=%d-%d'%(o,o+l-1)}); open('last.grib','wb').write(urllib.request.urlopen(req).read())
+              ln=struct.unpack('>Q',b[8:16])[0]; lens.append(ln)
+              if n==2: open('x.grib','wb').write(urllib.request.urlopen(urllib.request.Request(u, headers={'Range':'bytes=%d-%d'%(off,off+ln-1)})).read())
+              off+=ln; n+=1
+          print('messaggi',n,'dimensioni',sorted(set(lens))[:4])
           PY
-          grib_ls -p shortName,stepRange,stepType,packingType,gridType,Ni,Nj,bitsPerValue m.grib last.grib
-          grib_dump -O m.grib | grep -iE "packing|gridType|latitudeOfFirst|longitudeOfFirst|latitudeOfLast|longitudeOfLast|iDirectionIncrement|jDirectionIncrement|Ni =|Nj =|scanningMode|latitudeOfSouthernPole|longitudeOfSouthernPole|angleOfRotation|bitsPerValue|referenceValue|binaryScaleFactor|decimalScaleFactor|numberOfValues|bitMapIndicator|TemplateNumber|ccsds|order|missing" | head -50
-          grib_get_data m.grib | awk 'NR>1 && $3>0.5' | head -5
+            grib_ls -p shortName,stepRange,stepType,packingType,Ni,Nj,bitsPerValue,bitmapPresent x.grib | sed -n 2p
+          done
+          echo "==== EUMETView"
+          curl -sS "https://view.eumetsat.int/geoserver/wms?service=WMS&request=GetCapabilities&version=1.3.0" -o caps.xml; ls -la caps.xml
+          grep -o '<Name>[^<]*</Name>' caps.xml | grep -i -E 'li_|lightning|afa' | head -20
+          L=$(grep -o '<Name>[^<]*</Name>' caps.xml | grep -i -E 'li_afa|afa' | head -1 | sed 's/<[^>]*>//g')
+          echo "layer $L"
+          curl -sS -o li.png -w "%{http_code} %{content_type}\n" "https://view.eumetsat.int/geoserver/wms?service=WMS&request=GetMap&version=1.3.0&layers=$L&styles=&crs=EPSG:3857&bbox=1000000,4000000,2500000,5800000&width=512&height=512&format=image/png&transparent=true"
+          ls -la li.png; file li.png
+          grep -A30 "<Name>$L</Name>" caps.xml | grep -iE "Dimension|Extent|default" | head -5
