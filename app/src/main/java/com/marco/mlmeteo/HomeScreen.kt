@@ -1,6 +1,30 @@
 package com.marco.mlmeteo
 
 import androidx.compose.foundation.Canvas
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -80,7 +104,8 @@ fun HomeScreen(onAskGps: () -> Unit) {
         val place = places[pager.currentPage.coerceIn(0, places.size - 1)]
         TopBar(place, AppState.forecasts[place.id])
         if (places.size > 1) Dots(places.size, pager.currentPage)
-        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { i ->
+        BackHandler(enabled = HomeEdit.editing) { HomeEdit.editing = false }
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1, userScrollEnabled = !HomeEdit.editing) { i ->
             places.getOrNull(i)?.let { PlacePage(it) }
         }
     }
@@ -198,28 +223,44 @@ private fun PlacePage(place: Place) {
         ) {
             Spacer(Modifier.height(2.dp))
             val items = s.orderedItems().filter { s.visible(it) }
-            var i = 0
-            while (i < items.size) {
-                val item = items[i]
-                if (item.small) {
-                    val next = items.getOrNull(i + 1)?.takeIf { n -> n.small }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(Modifier.weight(1f)) { SmallCard(item, place, f, fmt) }
-                        Box(Modifier.weight(1f)) { if (next != null) SmallCard(next, place, f, fmt) }
+            val haptic = LocalHapticFeedback.current
+            val startEdit = Modifier.pointerInput(Unit) {
+                detectTapGestures(onLongPress = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    HomeEdit.editing = true
+                })
+            }
+            val block: @Composable (HomeItem) -> Unit = { item ->
+                when (item) {
+                    HomeItem.MAIN -> MainCard(f, fmt, err)
+                    HomeItem.SOURCE -> SourceLine(f)
+                    HomeItem.HOURS -> HoursCard(f, fmt)
+                    HomeItem.GRAPH -> GraphCard(f, fmt)
+                    HomeItem.DAYS -> DaysCard(f, fmt, s.daysCount)
+                    HomeItem.RADAR -> RadarPreviewCard(place)
+                    HomeItem.SUN -> SunCard(f, fmt)
+                    else -> SmallCard(item, place, f, fmt)
+                }
+            }
+            if (HomeEdit.editing) {
+                EditBar()
+                val spacing = with(LocalDensity.current) { 12.dp.toPx() }
+                items.forEach { item -> EditableItem(item, spacing) { block(item) } }
+            } else {
+                var i = 0
+                while (i < items.size) {
+                    val item = items[i]
+                    if (item.small) {
+                        val next = items.getOrNull(i + 1)?.takeIf { n -> n.small }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.weight(1f).then(startEdit)) { block(item) }
+                            Box(Modifier.weight(1f).then(startEdit)) { if (next != null) block(next) }
+                        }
+                        i += if (next != null) 2 else 1
+                    } else {
+                        Box(startEdit) { block(item) }
+                        i++
                     }
-                    i += if (next != null) 2 else 1
-                } else {
-                    when (item) {
-                        HomeItem.MAIN -> MainCard(f, fmt, err)
-                        HomeItem.SOURCE -> SourceLine(f)
-                        HomeItem.HOURS -> HoursCard(f, fmt)
-                        HomeItem.GRAPH -> GraphCard(f, fmt)
-                        HomeItem.DAYS -> DaysCard(f, fmt, s.daysCount)
-                        HomeItem.RADAR -> RadarPreviewCard(place)
-                        HomeItem.SUN -> SunCard(f, fmt)
-                        else -> {}
-                    }
-                    i++
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -594,6 +635,144 @@ private fun SunCard(f: Forecast, fmt: Fmt) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Alba ${fmt.time(sr)}", color = c.ink, fontSize = 15.sp)
             Text("Tramonto ${fmt.time(ss)}", color = c.ink, fontSize = 15.sp)
+        }
+    }
+}
+
+
+// ------------------------------------------------------------------ modifica della Home (come i widget del launcher)
+
+/** Stato della modifica: tieni premuto un pannello per spostarlo o toglierlo. */
+object HomeEdit {
+    var editing by mutableStateOf(false)
+    var dragId by mutableStateOf<String?>(null)
+    var dragOffset by mutableFloatStateOf(0f)
+    val heights = HashMap<String, Int>()
+
+    private fun swap(a: String, b: String) {
+        AppState.update { st ->
+            val l = st.orderedItems().map { it.id }.toMutableList()
+            val i = l.indexOf(a); val j = l.indexOf(b)
+            if (i >= 0 && j >= 0) { l[i] = b; l[j] = a }
+            st.copy(homeOrder = l)
+        }
+    }
+
+    fun drag(id: String, dy: Float, spacing: Float) {
+        dragOffset += dy
+        val st = AppState.settings
+        val order = st.orderedItems().filter { st.visible(it) }.map { it.id }
+        val idx = order.indexOf(id)
+        if (idx < 0) return
+        if (dragOffset > 0 && idx < order.lastIndex) {
+            val nh = (heights[order[idx + 1]] ?: 0) + spacing
+            if (dragOffset > nh / 2) { swap(id, order[idx + 1]); dragOffset -= nh }
+        } else if (dragOffset < 0 && idx > 0) {
+            val ph = (heights[order[idx - 1]] ?: 0) + spacing
+            if (-dragOffset > ph / 2) { swap(id, order[idx - 1]); dragOffset += ph }
+        }
+    }
+
+    fun hide(id: String) = AppState.update { it.copy(hidden = it.hidden + id) }
+    fun show(id: String) = AppState.update { it.copy(hidden = it.hidden - id) }
+}
+
+@Composable
+private fun EditBar() {
+    val c = LocalAppColors.current
+    val s = AppState.settings
+    var adding by remember { mutableStateOf(false) }
+    val hidden = s.orderedItems().filter { !s.visible(it) }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.accentContainer).padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Modifica Home", color = c.onAccentContainer, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text("Tieni premuto e trascina · − per togliere", color = c.onAccentContainer, fontSize = 12.sp)
+        }
+        if (hidden.isNotEmpty()) {
+            androidx.compose.material3.TextButton(onClick = { adding = true }) {
+                Icon(Icons.Filled.Add, contentDescription = null, tint = c.onAccentContainer)
+                Text(" Aggiungi", color = c.onAccentContainer)
+            }
+        }
+        Button(onClick = { HomeEdit.editing = false }) { Text("Fine") }
+    }
+    if (adding) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { adding = false },
+            title = { Text("Aggiungi alla Home") },
+            text = {
+                Column {
+                    hidden.forEach { h ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { HomeEdit.show(h.id); adding = false }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = null, tint = c.accent)
+                            Gap(12)
+                            Text(h.title, color = c.ink, fontSize = 16.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { adding = false }) { Text("Chiudi") } },
+        )
+    }
+}
+
+@Composable
+private fun EditableItem(item: HomeItem, spacing: Float, content: @Composable () -> Unit) {
+    val c = LocalAppColors.current
+    val haptic = LocalHapticFeedback.current
+    val dragging = HomeEdit.dragId == item.id
+    val wobble = rememberInfiniteTransition(label = "wobble")
+    val angle by wobble.animateFloat(
+        initialValue = -0.6f, targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(tween(150 + (item.ordinal % 3) * 20), RepeatMode.Reverse),
+        label = "angle",
+    )
+    Box(
+        Modifier.zIndex(if (dragging) 1f else 0f)
+            .onGloballyPositioned { HomeEdit.heights[item.id] = it.size.height }
+            .graphicsLayer {
+                translationY = if (dragging) HomeEdit.dragOffset else 0f
+                rotationZ = if (dragging) 0f else angle * (if (item.ordinal % 2 == 0) 1f else -1f)
+                val sc = if (dragging) 1.03f else 0.96f
+                scaleX = sc; scaleY = sc
+                shadowElevation = if (dragging) 16f else 0f
+            }
+    ) {
+        content()
+        // copre il pannello: in modifica si può solo spostare o togliere
+        Box(
+            Modifier.matchParentSize().pointerInput(item.id) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        HomeEdit.dragId = item.id; HomeEdit.dragOffset = 0f
+                    },
+                    onDragEnd = { HomeEdit.dragId = null; HomeEdit.dragOffset = 0f },
+                    onDragCancel = { HomeEdit.dragId = null; HomeEdit.dragOffset = 0f },
+                ) { change, amount ->
+                    change.consume()
+                    HomeEdit.drag(item.id, amount.y, spacing)
+                }
+            }
+        )
+        if (item.locked) {
+            Box(
+                Modifier.align(Alignment.TopStart).padding(6.dp).size(28.dp).clip(CircleShape).background(c.card2),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Lock, contentDescription = "Sempre visibile", tint = c.inkDim, modifier = Modifier.size(16.dp)) }
+        } else {
+            Box(
+                Modifier.align(Alignment.TopStart).padding(6.dp).size(32.dp).clip(CircleShape).background(Color(0xFFE53935))
+                    .clickable { HomeEdit.hide(item.id) },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Remove, contentDescription = "Togli ${item.title}", tint = Color.White, modifier = Modifier.size(20.dp)) }
         }
     }
 }

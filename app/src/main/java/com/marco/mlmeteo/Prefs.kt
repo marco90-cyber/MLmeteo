@@ -76,7 +76,7 @@ object Prefs {
             sourceId = p.getString("sourceId", d.sourceId) ?: d.sourceId,
             radarId = p.getString("radarId", d.radarId) ?: d.radarId,
             radarModel = (p.getString("radarModel", d.radarModel) ?: d.radarModel).let {
-                if (it == "icon2i" || it == "icon_seamless" || it == "ecmwf_ifs025") it else d.radarModel
+                if (it == "icon2i" || it == "wrf" || it == "icon_seamless" || it == "ecmwf_ifs025") it else d.radarModel
             },
             icon2iHours = p.getInt("icon2iHours", d.icon2iHours),
             showLightning = p.getBoolean("showLightning", d.showLightning),

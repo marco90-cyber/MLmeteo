@@ -257,7 +257,7 @@ object Icon2i {
                         MapLayer.WIND -> {
                             val us = steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { a[it] * 3.6f } } }
                             val vs = steps.map { s -> f(1, s).let { a -> FloatArray(a.size) { a[it] * 3.6f } } }
-                            Data(run, times, us.indices.map { k -> FloatArray(NI * NJ) { sqrt(us[k][it] * us[k][it] + vs[k][it] * vs[k][it]) } }, us, vs)
+                            Data(run, times, emptyList(), us, vs)
                         }
                         MapLayer.GUST -> Data(run, times, steps.map { s -> f(0, s).let { a -> FloatArray(a.size) { a[it] * 3.6f } } })
                         else -> Data(run, times, steps.map { s -> f(0, s) })
@@ -286,6 +286,16 @@ object Icon2i {
             val lat = yToLat(y0 + (j + 0.5) / H * (y1 - y0))
             ((lat - LAT0) / DLAT).roundToInt().coerceIn(0, NJ - 1)
         }
+    }
+
+    /** Immagine dell'ora [k]; per il vento la velocità si calcola da u e v. */
+    fun renderStep(d: Data, k: Int, layer: MapLayer): ImageBitmap? {
+        if (layer == MapLayer.WIND) {
+            val u = d.u?.getOrNull(k) ?: return null
+            val v = d.v?.getOrNull(k) ?: return null
+            return render(FloatArray(u.size) { sqrt(u[it] * u[it] + v[it] * v[it]) }, layer)
+        }
+        return render(d.values.getOrNull(k) ?: return null, layer)
     }
 
     fun render(values: FloatArray, layer: MapLayer): ImageBitmap {

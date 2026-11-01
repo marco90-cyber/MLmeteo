@@ -108,7 +108,8 @@ enum class MapLayer(val key: String?, val label: String, val unit: String) {
     GUST("wind_gusts_10m", "Raffiche", "km/h"),
     CLOUD("cloud_cover", "Nuvole", "%"),
     SNOW("snowfall", "Neve", "cm/h"),
-    LPI(null, "Fulmini previsti", "J/kg");
+    LPI(null, "Fulmini previsti", "J/kg"),
+    VIS(null, "Nebbia", "km");
 
     val stops: List<Pair<Double, Color>>
         get() = when (this) {
@@ -138,6 +139,8 @@ enum class MapLayer(val key: String?, val label: String, val unit: String) {
                 0.5 to Color(0x00FFEB3B), 1.0 to Color(0xAAFFEB3B), 5.0 to Color(0xCCFF9800), 15.0 to Color(0xDDF44336),
                 40.0 to Color(0xEE9C27B0),
             )
+            // visibilità: più è bassa, più la nebbia è fitta
+            VIS -> listOf(0.0 to Color(0xEE8E8E99), 1.0 to Color(0xCCB0B0BA), 3.0 to Color(0x88D0D0D8), 8.0 to Color(0x33E8E8EE), 10.0 to Color(0x00FFFFFF))
         }
 }
 
@@ -187,18 +190,57 @@ object DpcCache {
     }
 }
 
-/** Strati ICON-2I già scaricati (validi fino alla corsa successiva). */
-object Icon2iCache {
-    val data = HashMap<String, Pair<Long, Icon2i.Data>>()
-    fun get(layer: MapLayer, hours: Int): Icon2i.Data? =
-        data["$layer|$hours"]?.takeIf { System.currentTimeMillis() - it.first < 30 * 60_000 }?.second
-    fun put(layer: MapLayer, hours: Int, d: Icon2i.Data) { data["$layer|$hours"] = System.currentTimeMillis() to d }
+/** Dati di un modello ad alta risoluzione già pronti da disegnare (ICON-2I o WRF). */
+class HiRes(
+    val run: String,
+    val times: List<java.time.LocalDateTime>,
+    val north: Double, val south: Double, val west: Double, val east: Double,
+    val render: (Int, MapLayer) -> ImageBitmap?,
+    val wind: ((Int, Double, Double) -> Pair<Float, Float>?)?,
+)
+
+fun layersFor(model: String): List<MapLayer> = when (model) {
+    "icon2i" -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.SNOW, MapLayer.LPI)
+    "wrf" -> Wrf.layers
+    else -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.SNOW)
+}
+
+suspend fun loadHiRes(model: String, layer: MapLayer, hours: Int, progress: (Int, Int) -> Unit): HiRes = when (model) {
+    "wrf" -> Wrf.load(layer, hours, progress).let { d ->
+        HiRes(d.run, d.times, Wrf.NORTH, Wrf.SOUTH, Wrf.WEST, Wrf.EAST,
+            render = { k, l -> Wrf.render(d, k, l) },
+            wind = if (layer == MapLayer.WIND) { k, lat, lon -> Wrf.windAt(d, k, lat, lon) } else null)
+    }
+    else -> Icon2i.load(layer, hours.coerceAtMost(24), progress).let { d ->
+        HiRes(d.run, d.times, Icon2i.LAT1 + Icon2i.DLAT / 2, Icon2i.LAT0 - Icon2i.DLAT / 2,
+            Icon2i.LON0 - Icon2i.DLON / 2, Icon2i.LON1 + Icon2i.DLON / 2,
+            render = { k, l -> Icon2i.renderStep(d, k, l) },
+            wind = if (layer == MapLayer.WIND) { k, lat, lon ->
+                val u = d.u?.getOrNull(k); val v = d.v?.getOrNull(k)
+                if (u == null || v == null) null else {
+                    val a = Icon2i.sample(u, lat, lon); val b = Icon2i.sample(v, lat, lon)
+                    if (a.isNaN() || b.isNaN()) null else a to b
+                }
+            } else null)
+    }
+}
+
+/** Strati ad alta risoluzione già scaricati (validi 30 minuti). Uno solo in memoria alla volta. */
+object HiResCache {
+    private var key = ""
+    private var at = 0L
+    private var value: HiRes? = null
+    fun get(model: String, layer: MapLayer, hours: Int): HiRes? =
+        value?.takeIf { key == "$model|$layer|$hours" && System.currentTimeMillis() - at < 30 * 60_000 }
+    fun put(model: String, layer: MapLayer, hours: Int, d: HiRes) { key = "$model|$layer|$hours"; at = System.currentTimeMillis(); value = d }
+    fun clear() { value = null; key = "" }
 }
 
 private enum class RadarMode { DPC, RAINVIEWER, MODEL }
 
 val MapModels = listOf(
     "icon2i" to "ICON-2I 2 km",
+    "wrf" to "WRF 1,5 km",
     "icon_seamless" to "ICON",
     "ecmwf_ifs025" to "ECMWF",
 )
@@ -275,38 +317,41 @@ fun RadarScreen() {
     // --- previsione
     var layer by remember { mutableStateOf(MapLayer.RAIN) }
     val model = s.radarModel
-    val isIcon2i = model == "icon2i"
-    if (!isIcon2i && layer == MapLayer.LPI) layer = MapLayer.RAIN
+    // "isIcon2i" = modello ad alta risoluzione scaricato in app (ICON-2I o WRF)
+    val isIcon2i = model == "icon2i" || model == "wrf"
+    if (layer !in layersFor(model)) layer = MapLayer.RAIN
 
-    // ICON-2I
-    var i2 by remember { mutableStateOf<Icon2i.Data?>(null) }
+    // modelli ad alta risoluzione (ICON-2I, WRF)
+    var i2 by remember { mutableStateOf<HiRes?>(null) }
     var i2Index by remember { mutableIntStateOf(0) }
     var i2Loading by remember { mutableStateOf(false) }
     var i2Progress by remember { mutableStateOf("") }
     var i2Error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(mode, isIcon2i, layer, s.icon2iHours, reload) {
+    LaunchedEffect(mode, model, layer, s.icon2iHours, reload) {
         if (mode != RadarMode.MODEL || !isIcon2i) return@LaunchedEffect
-        val cached = Icon2iCache.get(layer, s.icon2iHours)
-        if (cached != null) { i2 = cached; i2Index = i2Index.coerceIn(0, cached.times.size - 1); return@LaunchedEffect }
+        if (layer !in layersFor(model)) { layer = MapLayer.RAIN; return@LaunchedEffect }
+        val cached = HiResCache.get(model, layer, s.icon2iHours)
+        if (cached != null) { i2 = cached; i2Index = i2Index.coerceIn(0, (cached.times.size - 1).coerceAtLeast(0)); return@LaunchedEffect }
         i2Loading = true
         i2Error = null
         i2 = null
+        HiResCache.clear()
+        val name = MapModels.firstOrNull { it.first == model }?.second ?: model
         try {
-            val d = Icon2i.load(layer, s.icon2iHours) { done, total -> i2Progress = "Scarico ICON-2I $done/$total…" }
-            Icon2iCache.put(layer, s.icon2iHours, d)
+            val d = loadHiRes(model, layer, s.icon2iHours) { done, total -> i2Progress = "Scarico $name $done/$total…" }
+            HiResCache.put(model, layer, s.icon2iHours, d)
             i2 = d
             i2Index = 0
         } catch (e: Exception) {
-            i2Error = e.message ?: "ICON-2I non disponibile"
+            i2Error = e.message ?: "$name non disponibile"
         }
         i2Loading = false
         i2Progress = ""
     }
-    val i2Images = remember(i2) { android.util.LruCache<Int, ImageBitmap>(4) }
+    val i2Images = remember(i2, layer) { android.util.LruCache<Int, ImageBitmap>(3) }
     fun i2Image(k: Int): ImageBitmap? {
         val d = i2 ?: return null
-        val v = d.values.getOrNull(k) ?: return null
-        return i2Images.get(k) ?: Icon2i.render(v, layer).also { i2Images.put(k, it) }
+        return i2Images.get(k) ?: d.render(k, layer)?.also { i2Images.put(k, it) }
     }
 
     // ICON / ECMWF (Open-Meteo): la griglia segue la zona visibile
@@ -363,7 +408,7 @@ fun RadarScreen() {
     val gridB = remember(grid, layer, hour) { grid?.let { if (gridCount > 0) gridBitmap(it, layer, (hour + 1) % gridCount) else null } }
 
     // --- animazione con dissolvenza
-    LaunchedEffect(playing, mode, isIcon2i) {
+    LaunchedEffect(playing, mode, isIcon2i, model) {
         phase = 0f
         while (playing) {
             for (k in 1..8) {
@@ -425,40 +470,37 @@ fun RadarScreen() {
                         val n = d.times.size
                         val a = i2Image(i2Index.coerceIn(0, n - 1))
                         val b = if (phase > 0f) i2Image((i2Index + 1) % n) else null
-                        val north = Icon2i.LAT1 + Icon2i.DLAT / 2; val south = Icon2i.LAT0 - Icon2i.DLAT / 2
-                        val west = Icon2i.LON0 - Icon2i.DLON / 2; val east = Icon2i.LON1 + Icon2i.DLON / 2
-                        if (a != null) drawRaster(a, north, south, west, east, if (b != null) 1f - phase else 1f)
-                        if (b != null) drawRaster(b, north, south, west, east, phase)
-                        // frecce del vento
-                        val u = d.u?.getOrNull(i2Index); val v = d.v?.getOrNull(i2Index)
-                        if (layer == MapLayer.WIND && u != null && v != null) {
-                            val cellPx = world * Icon2i.DLON / 360.0
-                            val step = (56.dp.toPx() / cellPx).roundToInt().coerceAtLeast(1)
+                        if (a != null) drawRaster(a, d.north, d.south, d.west, d.east, if (b != null) 1f - phase else 1f)
+                        if (b != null) drawRaster(b, d.north, d.south, d.west, d.east, phase)
+                        // frecce del vento su una griglia dello schermo
+                        val windFn = d.wind
+                        if (windFn != null) {
+                            val stepPx = 56.dp.toPx()
                             val len = 18.dp.toPx()
-                            var j = 0
-                            while (j < Icon2i.NJ) {
-                                var i = 0
-                                while (i < Icon2i.NI) {
-                                    val lat = Icon2i.LAT0 + j * Icon2i.DLAT
-                                    val lon = Icon2i.LON0 + i * Icon2i.DLON
-                                    val p = project(lat, lon)
-                                    if (p.x > -20 && p.y > -20 && p.x < size.width + 20 && p.y < size.height + 20) {
-                                        val uu = u[j * Icon2i.NI + i]; val vv = v[j * Icon2i.NI + i]
+                            val col = if (c.dark) Color.White.copy(alpha = 0.85f) else Color(0xDD1C1B21)
+                            var sy = stepPx / 2
+                            while (sy < size.height) {
+                                var sx = stepPx / 2
+                                while (sx < size.width) {
+                                    val lat = yToLat(state.y + (sy - size.height / 2) / world)
+                                    val lon = xToLon(state.x + (sx - size.width / 2) / world)
+                                    val w = windFn(i2Index.coerceIn(0, n - 1), lat, lon)
+                                    if (w != null) {
+                                        val (uu, vv) = w
                                         val sp = sqrt(uu * uu + vv * vv)
                                         if (sp > 2f) {
                                             val dx = uu / sp; val dy = -vv / sp
-                                            val tail = Offset(p.x - dx * len / 2, p.y - dy * len / 2)
-                                            val tip = Offset(p.x + dx * len / 2, p.y + dy * len / 2)
-                                            val col = if (c.dark) Color.White.copy(alpha = 0.85f) else Color(0xDD1C1B21)
+                                            val tail = Offset(sx - dx * len / 2, sy - dy * len / 2)
+                                            val tip = Offset(sx + dx * len / 2, sy + dy * len / 2)
                                             drawLine(col, tail, tip, 2.dp.toPx(), cap = StrokeCap.Round)
                                             val hx = -dx * 6.dp.toPx(); val hy = -dy * 6.dp.toPx()
                                             drawLine(col, tip, Offset(tip.x + hx - hy * 0.6f, tip.y + hy + hx * 0.6f), 2.dp.toPx(), cap = StrokeCap.Round)
                                             drawLine(col, tip, Offset(tip.x + hx + hy * 0.6f, tip.y + hy - hx * 0.6f), 2.dp.toPx(), cap = StrokeCap.Round)
                                         }
                                     }
-                                    i += step
+                                    sx += stepPx
                                 }
-                                j += step
+                                sy += stepPx
                             }
                         }
                     }
@@ -494,6 +536,7 @@ fun RadarScreen() {
                             when {
                                 mode == RadarMode.DPC -> "Radar Protezione Civile + previsto 60 min"
                                 mode == RadarMode.RAINVIEWER -> "Radar RainViewer"
+                                model == "wrf" -> "Previsione WRF (1,5 km)"
                                 isIcon2i -> "Previsione ICON-2I (2,2 km)"
                                 else -> "Previsione " + (MapModels.firstOrNull { it.first == model }?.second ?: "")
                             },
@@ -535,12 +578,13 @@ fun RadarScreen() {
                             Pill(label, model == id) { playing = false; AppState.update { it.copy(radarModel = id) } }
                         }
                         if (isIcon2i) {
-                            val next = when (s.icon2iHours) { 6 -> 12; 12 -> 24; else -> 6 }
+                            val next = if (model == "wrf") when (s.icon2iHours) { 6 -> 12; 12 -> 24; 24 -> 48; 48 -> 72; else -> 6 }
+                                else when (s.icon2iHours) { 6 -> 12; 12 -> 24; else -> 6 }
                             Pill("+${s.icon2iHours} h", false) { playing = false; AppState.update { it.copy(icon2iHours = next) } }
                         }
                     }
                     Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MapLayer.entries.filter { isIcon2i || it != MapLayer.LPI }.forEach { l ->
+                        layersFor(model).forEach { l ->
                             Pill(l.label, layer == l) { playing = false; layer = l }
                         }
                     }
@@ -557,14 +601,15 @@ fun RadarScreen() {
                         index = i2Index
                         busy = i2Loading
                         label = when {
-                            i2Loading -> i2Progress.ifBlank { "Scarico ICON-2I…" }
+                            i2Loading -> i2Progress.ifBlank { "Scarico i dati…" }
                             i2Error != null -> "Errore: $i2Error"
                             d != null && count > 0 -> d.times[i2Index.coerceIn(0, count - 1)]
                                 .format(DateTimeFormatter.ofPattern("EEE d · HH:mm", Locale.ITALY)).replaceFirstChar { it.uppercase() } +
                                 " · corsa ${d.run.substring(8)}:00 UTC"
                             else -> ""
                         }
-                        if (place != null && !Icon2i.contains(place.lat, place.lon) && !i2Loading) label = "ICON-2I copre solo l'Italia: scegli ICON o ECMWF"
+                        val covers = place == null || (if (model == "wrf") Wrf.contains(place.lat, place.lon) else Icon2i.contains(place.lat, place.lon))
+                        if (!covers && !i2Loading) label = "Questo modello copre solo l'Italia: scegli ICON o ECMWF"
                     }
                     mode == RadarMode.MODEL -> {
                         val g = grid
@@ -628,7 +673,7 @@ fun RadarScreen() {
                             when {
                                 mode == RadarMode.DPC -> scope.launch { DpcCache.ensure(force = true) }
                                 mode == RadarMode.RAINVIEWER -> scope.launch { RadarCache.ensure(force = true) }
-                                isIcon2i -> { Icon2iCache.data.clear(); reload++ }
+                                isIcon2i -> { HiResCache.clear(); reload++ }
                                 else -> reload++
                             }
                         },
@@ -661,6 +706,7 @@ fun RadarScreen() {
                     "© OpenStreetMap contributors · " + when {
                         mode == RadarMode.DPC -> "Radar: Dipartimento della Protezione Civile"
                         mode == RadarMode.RAINVIEWER -> "Rain Viewer"
+                        model == "wrf" -> "WRF: ItaliaMeteo"
                         isIcon2i -> "ICON-2I: ItaliaMeteo / ARPAE"
                         else -> "Dati Open-Meteo"
                     } + if (showLightning) " · Fulmini: © EUMETSAT" else "",
