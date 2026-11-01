@@ -1,0 +1,21 @@
+name: Probe allerte
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allerte
+        run: |
+          echo "#### DPC repo"
+          curl -sS "https://api.github.com/repos/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica/contents/" | python3 -c "import json,sys;[print(x['name'],x['type'],x.get('size')) for x in json.load(sys.stdin)]"
+          curl -sS "https://api.github.com/repos/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica/commits?per_page=2" | python3 -c "import json,sys;[print(c['commit']['committer']['date'],c['commit']['message'][:80]) for c in json.load(sys.stdin)]"
+          echo "#### DPC files dir"
+          curl -sS "https://api.github.com/repos/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica/contents/files" | python3 -c "import json,sys;d=json.load(sys.stdin);[print(x['name'],x['type']) for x in (d if isinstance(d,list) else [])][:20]" || true
+          echo "#### MeteoAlarm"
+          curl -sS -o ma.xml -w "%{http_code} %{size_download}\n" "https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-italy"
+          head -c 3000 ma.xml; echo
+          grep -o "<cap:geocode>.\{0,200\}" ma.xml | head -3
+          grep -c "<entry>" ma.xml
+          L=$(grep -o 'href="[^"]*" type="application/cap+xml"' ma.xml | head -1 | cut -d'"' -f2)
+          echo "CAP $L"; [ -n "$L" ] && curl -sS "$L" | head -c 4000
