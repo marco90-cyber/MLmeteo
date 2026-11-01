@@ -1,0 +1,19 @@
+name: Probe GFS
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: NOMADS
+        run: |
+          sudo apt-get install -y -qq libeccodes-tools > /dev/null 2>&1
+          D=$(date -u +%Y%m%d)
+          for R in 18 12 06 00; do
+            U="https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25_1hr.pl?dir=%2Fgfs.$D%2F$R%2Fatmos&file=gfs.t${R}z.pgrb2.0p25.f006&var_PRATE=on&var_APCP=on&var_TMP=on&lev_surface=on&lev_2_m_above_ground=on&subregion=&toplat=48&leftlon=5&rightlon=20&bottomlat=35"
+            code=$(curl -sS -o g.grib -w "%{http_code}" "$U"); echo "run $R: $code $(stat -c %s g.grib)"
+            [ "$code" = "200" ] && head -c 4 g.grib | grep -q GRIB && break
+          done
+          grib_ls -p shortName,typeOfLevel,stepRange,stepType,packingType,Ni,Nj,bitsPerValue g.grib
+          grib_dump -O g.grib | grep -E "latitudeOfFirst|longitudeOfFirst|latitudeOfLast|longitudeOfLast|iDirectionIncrement|jDirectionIncrement|scanningMode|missingValueManagement|orderOfSpatial|typeOfOriginalFieldValues|bitMapIndicator" | sort | uniq | head -20
+          curl -sS "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/" | grep -o 'gfs\.[0-9]*' | sort -u | tail -3
