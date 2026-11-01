@@ -53,6 +53,7 @@ object AppState {
         app = ctx.applicationContext
         Icon2i.cacheDir = app.cacheDir
         Wrf.cacheDir = app.cacheDir
+        Gfs.cacheDir = app.cacheDir
         AlertsRepo.cacheDir = app.cacheDir
         settings = Prefs.loadSettings(app)
         savedPlaces = Prefs.loadPlaces(app)

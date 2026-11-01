@@ -93,8 +93,8 @@ fun SettingsScreen() {
                     Choice("6", "Prossime 6 ore", "Circa 8 MB per strato."),
                     Choice("12", "Prossime 12 ore", "Circa 15 MB per strato."),
                     Choice("24", "Prossime 24 ore", "ICON-2I arriva al massimo a 24 ore."),
-                    Choice("48", "Prossime 48 ore (solo WRF)", "ICON-2I resta a 24 ore."),
-                    Choice("72", "Prossimi 3 giorni (solo WRF)", "ICON-2I resta a 24 ore."),
+                    Choice("48", "Prossime 48 ore (WRF e GFS)", "ICON-2I resta a 24 ore."),
+                    Choice("72", "Prossimi 3 giorni (WRF e GFS)", "ICON-2I resta a 24 ore."),
                 ),
                 s.icon2iHours.toString(),
             ) { v -> AppState.update { it.copy(icon2iHours = v.toInt()) } }

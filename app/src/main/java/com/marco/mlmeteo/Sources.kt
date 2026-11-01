@@ -56,7 +56,7 @@ enum class RadarSource(val id: String, val title: String, val info: String, val 
     AUTO("auto", "Automatico", "In Italia il radar della Protezione Civile con il previsto a 60 minuti, fuori dall'Italia RainViewer. Puoi passare alla previsione dei modelli.", true),
     DPC("dpc", "Protezione Civile (Italia)", "Radar nazionale dettagliato (1 km) ogni 10 minuti, ultima ora più il radar previsto per i prossimi 60 minuti.", true),
     RAINVIEWER("rainviewer", "RainViewer (attuale e storico)", "Radar reale di tutto il mondo, ultime 2 ore. Meno dettagliato.", true),
-    MLMAP("mlmap", "Mappa MLMeteo (attuale e previsione)", "ICON-2I a 2,2 km sull'Italia per le prossime ore (dettagliata come le cartine dei siti meteo), oppure ICON e GFS per i giorni successivi. Pioggia, temperatura, vento, raffiche, nuvole, neve e fulmini previsti.", true),
+    MLMAP("mlmap", "Mappa MLMeteo (attuale e previsione)", "ICON-2I a 2,2 km sull'Italia per le prossime ore (dettagliata come le cartine dei siti meteo), oppure ICON e GFS HD per i giorni successivi. Pioggia, temperatura, vento, raffiche, nuvole, neve e fulmini previsti.", true),
     OWM("owm", "OpenWeatherMap (con chiave)", "Strati extra con la tua chiave API. In arrivo in una prossima versione.", false);
 
     companion object {

@@ -202,10 +202,22 @@ class HiRes(
 fun layersFor(model: String): List<MapLayer> = when (model) {
     "icon2i" -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.SNOW, MapLayer.LPI)
     "wrf" -> Wrf.layers
+    "gfs" -> Gfs.layers
     else -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.SNOW)
 }
 
 suspend fun loadHiRes(model: String, layer: MapLayer, hours: Int, progress: (Int, Int) -> Unit): HiRes = when (model) {
+    "gfs" -> Gfs.load(layer, hours, progress).let { d ->
+        HiRes(d.run, d.times, Gfs.NORTH, Gfs.SOUTH, Gfs.WEST, Gfs.EAST,
+            render = { k, l -> Gfs.render(d, k, l) },
+            wind = if (layer == MapLayer.WIND) { k, lat, lon ->
+                val u = d.u?.getOrNull(k); val v = d.v?.getOrNull(k)
+                if (u == null || v == null) null else {
+                    val a = Gfs.sample(u, lat, lon); val b = Gfs.sample(v, lat, lon)
+                    if (a.isNaN() || b.isNaN()) null else a to b
+                }
+            } else null)
+    }
     "wrf" -> Wrf.load(layer, hours, progress).let { d ->
         HiRes(d.run, d.times, Wrf.NORTH, Wrf.SOUTH, Wrf.WEST, Wrf.EAST,
             render = { k, l -> Wrf.render(d, k, l) },
@@ -242,7 +254,7 @@ val MapModels = listOf(
     "icon2i" to "ICON-2I 2 km",
     "wrf" to "WRF 1,5 km",
     "icon_seamless" to "ICON",
-    "gfs_seamless" to "GFS",
+    "gfs" to "GFS HD",
 )
 
 // ------------------------------------------------------------------ schermata Radar
@@ -318,7 +330,7 @@ fun RadarScreen() {
     var layer by remember { mutableStateOf(MapLayer.RAIN) }
     val model = s.radarModel
     // "isIcon2i" = modello ad alta risoluzione scaricato in app (ICON-2I o WRF)
-    val isIcon2i = model == "icon2i" || model == "wrf"
+    val isIcon2i = model == "icon2i" || model == "wrf" || model == "gfs"
     if (layer !in layersFor(model)) layer = MapLayer.RAIN
 
     // modelli ad alta risoluzione (ICON-2I, WRF)
@@ -537,6 +549,7 @@ fun RadarScreen() {
                                 mode == RadarMode.DPC -> "Radar Protezione Civile + previsto 60 min"
                                 mode == RadarMode.RAINVIEWER -> "Radar RainViewer"
                                 model == "wrf" -> "Previsione WRF (1,5 km)"
+                                model == "gfs" -> "Previsione GFS HD (0,25°)"
                                 isIcon2i -> "Previsione ICON-2I (2,2 km)"
                                 else -> "Previsione " + (MapModels.firstOrNull { it.first == model }?.second ?: "")
                             },
@@ -578,7 +591,7 @@ fun RadarScreen() {
                             Pill(label, model == id) { playing = false; AppState.update { it.copy(radarModel = id) } }
                         }
                         if (isIcon2i) {
-                            val next = if (model == "wrf") when (s.icon2iHours) { 6 -> 12; 12 -> 24; 24 -> 48; 48 -> 72; else -> 6 }
+                            val next = if (model == "wrf" || model == "gfs") when (s.icon2iHours) { 6 -> 12; 12 -> 24; 24 -> 48; 48 -> 72; else -> 6 }
                                 else when (s.icon2iHours) { 6 -> 12; 12 -> 24; else -> 6 }
                             Pill("+${s.icon2iHours} h", false) { playing = false; AppState.update { it.copy(icon2iHours = next) } }
                         }
@@ -608,8 +621,12 @@ fun RadarScreen() {
                                 " · corsa ${d.run.substring(8)}:00 UTC"
                             else -> ""
                         }
-                        val covers = place == null || (if (model == "wrf") Wrf.contains(place.lat, place.lon) else Icon2i.contains(place.lat, place.lon))
-                        if (!covers && !i2Loading) label = "Questo modello copre solo l'Italia: scegli ICON o GFS"
+                        val covers = place == null || when (model) {
+                            "wrf" -> Wrf.contains(place.lat, place.lon)
+                            "gfs" -> place.lat in Gfs.SOUTH..Gfs.NORTH && place.lon in Gfs.WEST..Gfs.EAST
+                            else -> Icon2i.contains(place.lat, place.lon)
+                        }
+                        if (!covers && !i2Loading) label = "Questo modello copre solo l'Italia: scegli ICON o GFS HD"
                     }
                     mode == RadarMode.MODEL -> {
                         val g = grid
@@ -707,6 +724,7 @@ fun RadarScreen() {
                         mode == RadarMode.DPC -> "Radar: Dipartimento della Protezione Civile"
                         mode == RadarMode.RAINVIEWER -> "Rain Viewer"
                         model == "wrf" -> "WRF: ItaliaMeteo"
+                        model == "gfs" -> "GFS: NOAA"
                         isIcon2i -> "ICON-2I: ItaliaMeteo / ARPAE"
                         else -> "Dati Open-Meteo"
                     } + if (showLightning) " · Fulmini: © EUMETSAT" else "",
