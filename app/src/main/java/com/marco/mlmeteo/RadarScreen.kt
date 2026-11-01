@@ -100,7 +100,7 @@ enum class MapLayer(val key: String, val label: String, val unit: String) {
     val stops: List<Pair<Double, Color>>
         get() = when (this) {
             RAIN -> listOf(
-                0.05 to Color(0x0029B6F6), 0.2 to Color(0x9981D4FA), 1.0 to Color(0xCC29B6F6), 2.0 to Color(0xCC66BB6A),
+                0.2 to Color(0x0029B6F6), 0.3 to Color(0x8881D4FA), 1.0 to Color(0xCC29B6F6), 2.0 to Color(0xCC66BB6A),
                 4.0 to Color(0xDDFFEE58), 8.0 to Color(0xDDFFA726), 16.0 to Color(0xDDEF5350), 32.0 to Color(0xDDAB47BC),
             )
             TEMP -> listOf(
@@ -164,8 +164,6 @@ private enum class RadarMode { DPC, RAINVIEWER, MODEL }
 private val MapModels = listOf(
     "icon_seamless" to "ICON",
     "ecmwf_ifs025" to "ECMWF",
-    "italia_meteo_arpae_icon_2i" to "ARPAE 2 km",
-    "icon_d2" to "ICON-D2 2 km",
 )
 
 @Composable
@@ -399,7 +397,6 @@ fun RadarScreen() {
                         gridLoading -> "Calcolo della mappa…"
                         else -> "Fermati su una zona per calcolare la mappa"
                     }
-                    if (gridModel == "icon_d2" || gridModel == "italia_meteo_arpae_icon_2i") label += " (area limitata)"
                 }
                 RadarMode.DPC -> {
                     val l = dpc

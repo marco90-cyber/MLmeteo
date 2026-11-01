@@ -73,7 +73,9 @@ object Prefs {
         return Settings(
             sourceId = p.getString("sourceId", d.sourceId) ?: d.sourceId,
             radarId = p.getString("radarId", d.radarId) ?: d.radarId,
-            radarModel = p.getString("radarModel", d.radarModel) ?: d.radarModel,
+            radarModel = (p.getString("radarModel", d.radarModel) ?: d.radarModel).let {
+                if (it == "icon_seamless" || it == "ecmwf_ifs025") it else d.radarModel
+            },
             useWallpaper = p.getBoolean("useWallpaper", d.useWallpaper),
             manualColor = p.getLong("manualColor", d.manualColor),
             mode = p.getString("mode", d.mode) ?: d.mode,
