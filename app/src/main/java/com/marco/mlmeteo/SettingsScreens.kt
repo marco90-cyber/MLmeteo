@@ -110,6 +110,10 @@ fun SettingsScreen() {
                 AppState.update { it.copy(useGps = v) }
                 if (v) AppState.locate()
             }
+            if (s.useGps) {
+                Divider()
+                BackgroundLocationRow()
+            }
         }
 
         SectionTitle("Aspetto")
@@ -530,5 +534,37 @@ fun InfoScreen() {
                 color = LocalAppColors.current.inkDim, fontSize = 13.sp,
             )
         }
+    }
+}
+
+
+/** Permesso "Consenti sempre": serve perché widget e notifiche seguano la posizione anche ad app chiusa. */
+@Composable
+fun BackgroundLocationRow() {
+    val ctx = LocalContext.current
+    var granted by remember { mutableStateOf(Locator.hasBackground(ctx)) }
+    val ask = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted = Locator.hasBackground(ctx) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        granted = Locator.hasBackground(ctx)
+        onDispose { }
+    }
+    SettingRow(
+        "Posizione anche ad app chiusa",
+        if (granted) "Attiva: widget e notifiche seguono dove ti trovi"
+        else "Per aggiornare widget e notifiche quando cambi città: scegli \"Consenti sempre\"",
+        Icons.Filled.MyLocation,
+        onClick = {
+            if (!granted && Build.VERSION.SDK_INT >= 29) {
+                ask.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            } else {
+                try {
+                    ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)))
+                } catch (e: Exception) { }
+            }
+        },
+    ) {
+        Switch(checked = granted, onCheckedChange = null)
     }
 }

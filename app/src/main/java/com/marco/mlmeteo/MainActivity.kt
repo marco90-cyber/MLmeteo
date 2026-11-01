@@ -46,7 +46,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        AppState.places.forEach { AppState.refreshIfOld(it) }
+        AppState.locate()
+        AppState.savedPlaces.forEach { AppState.refreshIfOld(it) }
     }
 }
 

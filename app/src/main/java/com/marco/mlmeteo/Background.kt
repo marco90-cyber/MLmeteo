@@ -71,8 +71,11 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         val s = Prefs.loadSettings(ctx)
+        // posizione aggiornata anche ad app chiusa (serve il permesso "Consenti sempre")
+        if (s.useGps && Locator.hasBackground(ctx)) try { Locator.update(ctx) } catch (e: Exception) { }
         val places = (listOfNotNull(Prefs.loadGps(ctx).takeIf { s.useGps }) + Prefs.loadPlaces(ctx))
-        val main = places.firstOrNull { it.id == s.mainPlaceId } ?: places.firstOrNull() ?: return Result.success()
+        val main = places.firstOrNull { it.id == s.mainPlaceId } ?: places.firstOrNull()
+        if (main == null) { Widgets.refreshDone(ctx); Widgets.updateAll(ctx); return Result.success() }
         val wanted = (Widgets.placeIds(ctx) + main.id).toSet()
         val source = Sources.byId(s.sourceId)
         for (p in places.filter { it.id in wanted }) {
@@ -262,5 +265,33 @@ object Notify {
         val y = size / 2f - (paint.descent() + paint.ascent()) / 2
         c.drawText(text, size / 2f, y, paint)
         return IconCompat.createWithBitmap(bmp)
+    }
+}
+
+
+/** Posizione GPS letta in background (per widget e notifiche). */
+object Locator {
+    fun hasBackground(ctx: Context): Boolean {
+        val fg = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fg) return false
+        return Build.VERSION.SDK_INT < 29 ||
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Legge la posizione e, se ti sei spostato, aggiorna la località GPS salvata. */
+    suspend fun update(ctx: Context) {
+        val loc = kotlinx.coroutines.withTimeoutOrNull(25_000) { AppState.currentLocation(ctx) } ?: return
+        val old = Prefs.loadGps(ctx)
+        val probe = Place("gps", "", "", loc.latitude, loc.longitude, gps = true)
+        if (old != null && roughKm(old, probe) < 1.0) return
+        val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            AppState.cityName(loc.latitude, loc.longitude, ctx) ?: reverseName(loc.latitude, loc.longitude)
+        }
+        val p = Place(
+            "gps", info?.first ?: old?.name ?: "Posizione attuale",
+            info?.second?.takeIf { it.isNotBlank() } ?: old?.region ?: "Posizione attuale",
+            loc.latitude, loc.longitude, gps = true, cc = info?.third?.takeIf { it.isNotBlank() } ?: old?.cc ?: "",
+        )
+        Prefs.saveGps(ctx, p)
     }
 }

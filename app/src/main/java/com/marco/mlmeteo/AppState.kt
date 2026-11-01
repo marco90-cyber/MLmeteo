@@ -175,8 +175,8 @@ object AppState {
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun currentLocation(): Location? {
-        val lm = app.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    suspend fun currentLocation(ctx: Context = app): Location? {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val providers = lm.getProviders(true)
         val last = providers.mapNotNull { try { lm.getLastKnownLocation(it) } catch (e: Exception) { null } }
             .maxByOrNull { it.time }
@@ -190,7 +190,7 @@ object AppState {
             suspendCancellableCoroutine<Location?> { cont ->
                 try {
                     if (Build.VERSION.SDK_INT >= 30) {
-                        lm.getCurrentLocation(provider, null, ContextCompat.getMainExecutor(app)) { l ->
+                        lm.getCurrentLocation(provider, null, ContextCompat.getMainExecutor(ctx)) { l ->
                             if (cont.isActive) cont.resume(l)
                         }
                     } else {
@@ -211,10 +211,10 @@ object AppState {
         return fresh ?: last
     }
 
-    private fun cityName(lat: Double, lon: Double): Triple<String, String, String>? = try {
+    fun cityName(lat: Double, lon: Double, ctx: Context = app): Triple<String, String, String>? = try {
         if (!Geocoder.isPresent()) null else {
             @Suppress("DEPRECATION")
-            val list = Geocoder(app, Locale.ITALY).getFromLocation(lat, lon, 1)
+            val list = Geocoder(ctx, Locale.ITALY).getFromLocation(lat, lon, 1)
             val a = list?.firstOrNull()
             val n = a?.locality ?: a?.subAdminArea
             if (n == null) null else Triple(n, a?.adminArea ?: "", a?.countryCode?.lowercase() ?: "")
