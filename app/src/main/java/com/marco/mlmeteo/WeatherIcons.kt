@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -28,10 +29,10 @@ val IconSetNames = listOf(
 )
 
 @Composable
-fun WeatherIcon(code: Int, isDay: Boolean, size: Dp = 32.dp, set: Int = AppState.settings.iconSet) {
+fun WeatherIcon(code: Int, isDay: Boolean, size: Dp = 32.dp, set: Int = AppState.settings.iconSet, phase: Float = 0f, amp: Float = 0f) {
     val c = LocalAppColors.current
     Canvas(Modifier.size(size)) {
-        drawWeather(skyOf(code), isDay, set, c.accent, c.ink)
+        drawWeather(skyOf(code), isDay, set, c.accent, c.ink, phase, amp)
     }
 }
 
@@ -79,9 +80,10 @@ private class Pal(
         }
     }
 
-    fun DrawScope.line(x1: Float, y1: Float, x2: Float, y2: Float, kind: String) {
+    fun DrawScope.line(x1: Float, y1: Float, x2: Float, y2: Float, kind: String, alpha: Float = 1f) {
+        if (alpha <= 0.01f) return
         val col = if (set == 4 && kind == "drop") Color(0xFF4FA3FF) else color(kind)
-        drawLine(col, Offset(x1 * k, y1 * k), Offset(x2 * k, y2 * k), strokeWidth = 2.8f * k, cap = StrokeCap.Round)
+        drawLine(col.copy(alpha = col.alpha * alpha.coerceIn(0f, 1f)), Offset(x1 * k, y1 * k), Offset(x2 * k, y2 * k), strokeWidth = 2.8f * k, cap = StrokeCap.Round)
     }
 }
 
@@ -107,66 +109,111 @@ private fun moonPath(k: Float, cx: Float, cy: Float, r: Float): Path {
     return Path().apply { op(a, b, PathOperation.Difference) }
 }
 
-private fun Pal.sun(scope: DrawScope, cx: Float, cy: Float, r: Float) = with(scope) {
+/** Sole: [rot] gradi di rotazione dei raggi, [pulse] -1..1 allunga/accorcia i raggi. */
+private fun Pal.sun(scope: DrawScope, cx: Float, cy: Float, r: Float, rot: Float = 0f, pulse: Float = 0f) = with(scope) {
     shape(circle(k, cx, cy, r), "sun", cy - r, cy + r)
+    val len = 7f + pulse * 1.3f
     for (i in 0 until 8) {
-        val a = Math.toRadians(i * 45.0)
+        val a = Math.toRadians(i * 45.0 + rot)
         val c = kotlin.math.cos(a).toFloat(); val s = kotlin.math.sin(a).toFloat()
-        line(cx + c * (r + 3.5f), cy + s * (r + 3.5f), cx + c * (r + 7f), cy + s * (r + 7f), "sun")
+        line(cx + c * (r + 3.5f), cy + s * (r + 3.5f), cx + c * (r + len), cy + s * (r + len), "sun")
     }
 }
 
-fun DrawScope.drawWeather(sky: Sky, isDay: Boolean, set: Int, accent: Color, ink: Color) {
+private fun frac(x: Float) = x - kotlin.math.floor(x)
+
+/**
+ * Disegna l'icona. [phase] = cicli di animazione trascorsi, [amp] = intensità 0..1:
+ * con amp = 0 l'icona è ferma (identica a quella statica), con amp = 1 è animata del tutto.
+ * Ogni movimento è moltiplicato per [amp], così l'animazione parte e torna ferma senza scatti.
+ */
+fun DrawScope.drawWeather(sky: Sky, isDay: Boolean, set: Int, accent: Color, ink: Color, phase: Float = 0f, amp: Float = 0f) {
     val k = size.minDimension / 48f
     val p = Pal(set, accent, ink, k)
+    val tw = (2 * Math.PI * phase).toFloat()
+    val sway = amp * kotlin.math.sin(tw)
+    val still = 1f - amp
     with(p) {
+        // gocce che cadono dalla nuvola: quelle ferme sfumano, quelle in movimento compaiono
+        fun drops(xs: List<Float>, y0: Float, len: Float, slant: Float, fall: Float) {
+            for (x in xs) line(x, y0, x - slant, y0 + len, "drop", still)
+            if (amp > 0.01f) xs.forEachIndexed { i, x ->
+                val o = frac(phase + i / xs.size.toFloat())
+                val y = y0 - 2f + o * fall
+                line(x + o * slant * 0.5f, y, x - slant + o * slant * 0.5f, y + len, "drop", amp * (1f - o * o))
+            }
+        }
         when (sky) {
-            Sky.CLEAR -> if (isDay) sun(this@drawWeather, 24f, 24f, 9f)
-            else shape(moonPath(k, 24f, 24f, 14f), "moon", 10f, 38f)
-
-            Sky.PARTLY -> {
-                if (isDay) sun(this@drawWeather, 17f, 16f, 6.5f)
-                else shape(moonPath(k, 18f, 15f, 9f), "moon", 6f, 24f)
-                shape(cloudPath(k, 0.85f, 8f, 9f), "cloud", 19f, 40f)
+            Sky.CLEAR -> if (isDay) sun(this@drawWeather, 24f, 24f, 9f, rot = phase * 45f, pulse = sway)
+            else {
+                rotate(sway * 7f, Offset(24f * k, 24f * k)) { shape(moonPath(k, 24f, 24f, 14f), "moon", 10f, 38f) }
+                if (amp > 0.01f) listOf(Triple(9f, 11f, 0f), Triple(40f, 9f, 2f), Triple(39f, 39f, 4f)).forEach { (x, y, ph) ->
+                    val tw2 = 0.5f + 0.5f * kotlin.math.sin(tw + ph)
+                    drawCircle(color("moon").copy(alpha = amp * tw2), (1.1f + tw2) * k, Offset(x * k, y * k))
+                }
             }
 
-            Sky.CLOUDY -> shape(cloudPath(k, 1f, 0f, 3f), "cloud", 13f, 39f)
+            Sky.PARTLY -> {
+                if (isDay) sun(this@drawWeather, 17f, 16f, 6.5f, rot = phase * 45f, pulse = sway)
+                else shape(moonPath(k, 18f, 15f, 9f), "moon", 6f, 24f)
+                shape(cloudPath(k, 0.85f, 8f + sway * 2.2f, 9f), "cloud", 19f, 40f)
+            }
+
+            Sky.CLOUDY -> {
+                if (amp > 0.01f) shape(cloudPath(k, 0.55f, 2f - sway * 2.5f, 2f), "cloud", 5f, 22f)
+                shape(cloudPath(k, 1f, sway * 2.5f, 3f), "cloud", 13f, 39f)
+            }
 
             Sky.FOG -> {
-                shape(cloudPath(k, 1f, 0f, -8f), "cloud", 2f, 28f)
-                line(11f, 34f, 37f, 34f, "cloud")
-                line(11f, 39f, 37f, 39f, "cloud")
-                line(14f, 44f, 34f, 44f, "cloud")
+                shape(cloudPath(k, 1f, sway * 1.5f, -8f), "cloud", 2f, 28f)
+                line(11f + sway * 3f, 34f, 37f + sway * 3f, 34f, "cloud")
+                line(11f - sway * 3f, 39f, 37f - sway * 3f, 39f, "cloud")
+                line(14f + sway * 2f, 44f, 34f + sway * 2f, 44f, "cloud")
             }
 
             Sky.DRIZZLE -> {
-                shape(cloudPath(k, 1f, 0f, -8f), "cloud", 2f, 28f)
-                for (x in listOf(17f, 25f, 33f)) line(x, 34f, x - 0.6f, 36f, "drop")
-                for (x in listOf(21f, 29f)) line(x, 40f, x - 0.6f, 42f, "drop")
+                shape(cloudPath(k, 1f, sway * 1.2f, -8f), "cloud", 2f, 28f)
+                for (x in listOf(17f, 25f, 33f)) line(x, 34f, x - 0.6f, 36f, "drop", still)
+                for (x in listOf(21f, 29f)) line(x, 40f, x - 0.6f, 42f, "drop", still)
+                if (amp > 0.01f) listOf(17f, 25f, 33f, 21f, 29f).forEachIndexed { i, x ->
+                    val o = frac(phase + i / 5f)
+                    line(x, 32f + o * 12f, x - 0.6f, 34f + o * 12f, "drop", amp * (1f - o * o))
+                }
             }
 
             Sky.RAIN -> {
-                shape(cloudPath(k, 1f, 0f, -8f), "cloud", 2f, 28f)
-                for (x in listOf(17f, 25f, 33f)) line(x, 33f, x - 2f, 41f, "drop")
+                shape(cloudPath(k, 1f, sway * 1.2f, -8f), "cloud", 2f, 28f)
+                drops(listOf(17f, 25f, 33f), 33f, 8f, 2f, 10f)
             }
 
             Sky.SNOW -> {
-                shape(cloudPath(k, 1f, 0f, -8f), "cloud", 2f, 28f)
+                shape(cloudPath(k, 1f, sway * 1.2f, -8f), "cloud", 2f, 28f)
                 val flakes = listOf(16f to 35f, 24f to 39f, 32f to 35f, 20f to 44f, 28f to 44f)
-                for ((x, y) in flakes) {
-                    if (set == 2 || set == 5) drawCircle(color("snow").let { if (set == 5) accent else it }, 2.2f * k, Offset(x * k, y * k), style = stroke)
-                    else drawCircle(if (set == 0 || set == 3) color("snow") else Color(0xFFDDEEFF), 2.4f * k, Offset(x * k, y * k))
+                fun flake(x: Float, y: Float, a: Float) {
+                    if (a <= 0.01f) return
+                    if (set == 2 || set == 5) drawCircle(color("snow").let { if (set == 5) accent else it }.copy(alpha = a), 2.2f * k, Offset(x * k, y * k), style = stroke)
+                    else drawCircle((if (set == 0 || set == 3) color("snow") else Color(0xFFDDEEFF)).copy(alpha = a), 2.4f * k, Offset(x * k, y * k))
+                }
+                for ((x, y) in flakes) flake(x, y, still)
+                if (amp > 0.01f) flakes.forEachIndexed { i, (x, _) ->
+                    val o = frac(phase + i / 5f)
+                    flake(x + kotlin.math.sin((o * 2 + i) * Math.PI.toFloat()) * 2f, 32f + o * 14f, amp * (1f - o * o))
                 }
             }
 
             Sky.STORM -> {
-                shape(cloudPath(k, 1f, 0f, -8f), "dark", 2f, 28f)
+                shape(cloudPath(k, 1f, sway * 1.2f, -8f), "dark", 2f, 28f)
                 val bolt = Path().apply {
                     moveTo(25f * k, 29f * k); lineTo(18f * k, 39f * k); lineTo(24f * k, 39f * k)
                     lineTo(21f * k, 47f * k); lineTo(31f * k, 35f * k); lineTo(25f * k, 35f * k)
                     lineTo(28f * k, 29f * k); close()
                 }
-                shape(bolt, "bolt", 29f, 47f)
+                // lampo: il fulmine sparisce e riappare più luminoso, due volte per ciclo
+                val f = frac(phase)
+                val flash = if (f < 0.06f || (f in 0.12f..0.17f)) 1f else 0f
+                val dim = if (f in 0.06f..0.12f) amp * 0.85f else 0f
+                if (dim < 0.8f) shape(bolt, "bolt", 29f, 47f)
+                if (flash * amp > 0.01f) drawPath(bolt, Color.White.copy(alpha = 0.75f * amp))
             }
         }
     }

@@ -289,26 +289,52 @@ private fun MainCard(f: Forecast, fmt: Fmt, err: String?) {
     val c = LocalAppColors.current
     val cur = f.current
     val today = f.days.firstOrNull()
-    CardBox(padding = 22) {
-        val updated = java.time.Instant.ofEpochMilli(f.fetchedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
-        Text(
-            "Aggiornato alle ${fmt.time(updated)}" + if (err != null) " · offline" else "",
-            color = c.inkDim, fontSize = 13.sp,
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            WeatherIcon(cur.code, cur.isDay, 110.dp)
-            Gap(20)
-            Column {
-                Text(fmt.temp(cur.temp), color = c.ink, fontSize = 80.sp, fontWeight = FontWeight.Bold, lineHeight = 84.sp)
-                Text(conditionText(cur.code, cur.isDay), color = c.inkDim, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+    val mode = AppState.settings.animations
+    val sky = skyOf(cur.code)
+    var taps by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val fx = rememberFx(sky, mode, Triple(f.fetchedAt, cur.code, taps))
+    // ombra morbida: il testo resta leggibile sopra l'effetto
+    val shadow = androidx.compose.ui.graphics.Shadow(
+        if (c.dark) Color.Black.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.8f),
+        androidx.compose.ui.geometry.Offset(0f, 1.5f), 10f,
+    )
+    Box(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card)
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+            ) { if (mode != "off") taps++ },
+    ) {
+        WeatherBackdrop(Modifier.matchParentSize(), sky, cur.isDay, cur.precip, fx, animate = mode == "always" || mode == "once")
+        // velo leggero dietro al testo
+        Box(Modifier.matchParentSize().background(
+            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                listOf(Color.Transparent, c.card.copy(alpha = 0.35f), c.card.copy(alpha = 0.15f)),
+            ),
+        ))
+        Column(Modifier.padding(22.dp)) {
+            val updated = java.time.Instant.ofEpochMilli(f.fetchedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+            Text(
+                "Aggiornato alle ${fmt.time(updated)}" + if (err != null) " · offline" else "",
+                color = c.inkDim, fontSize = 13.sp, style = androidx.compose.ui.text.TextStyle(shadow = shadow),
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                WeatherIcon(cur.code, cur.isDay, 110.dp, phase = fx.phase, amp = if (mode == "off") 0f else fx.amp)
+                Gap(20)
+                Column {
+                    Text(fmt.temp(cur.temp), color = c.ink, fontSize = 80.sp, fontWeight = FontWeight.Bold, lineHeight = 84.sp,
+                        style = androidx.compose.ui.text.TextStyle(shadow = shadow))
+                    Text(conditionText(cur.code, cur.isDay), color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.Medium,
+                        style = androidx.compose.ui.text.TextStyle(shadow = shadow))
+                }
             }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Max ${fmt.temp(today?.tMax ?: Double.NaN)} · Min ${fmt.temp(today?.tMin ?: Double.NaN)} · Percepita ${fmt.temp(cur.feels)}",
+                color = c.ink, fontSize = 16.sp, style = androidx.compose.ui.text.TextStyle(shadow = shadow),
+            )
         }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "Max ${fmt.temp(today?.tMax ?: Double.NaN)} · Min ${fmt.temp(today?.tMin ?: Double.NaN)} · Percepita ${fmt.temp(cur.feels)}",
-            color = c.inkDim, fontSize = 16.sp,
-        )
     }
 }
 

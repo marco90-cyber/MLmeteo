@@ -208,6 +208,21 @@ fun AppearanceScreen() {
             }
         }
 
+        SectionTitle("Animazioni")
+        Group {
+            ChoiceRow(
+                "Card principale", null,
+                listOf(
+                    Choice("once", "Solo all'apertura", "Fermo → si anima → torna fermo. Tocca la card per rivederla."),
+                    Choice("always", "Sempre", "Icona e sfondo sempre in movimento"),
+                    Choice("icons", "Solo icone", "L'icona si anima, lo sfondo resta fermo"),
+                    Choice("off", "No", "Tutto fermo"),
+                ),
+                s.animations,
+            ) { v -> AppState.update { it.copy(animations = v) } }
+        }
+        Hint("Nuvole che passano, pioggia, neve, lampi e stelle nella card principale. Le animazioni si fermano quando l'app non è aperta.")
+
         SectionTitle("Icone meteo")
         val rows = IconSetNames.indices.chunked(2)
         rows.forEach { pair ->
