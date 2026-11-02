@@ -2,9 +2,13 @@
 <resources>
     <string name="app_name">MLMeteo</string>
     <string name="widget_small">Meteo piccolo: temperatura e cielo</string>
-    <string name="widget_medium">Meteo medio: come il widget di MLauncher, con le prossime ore</string>
+    <string name="widget_medium">Meteo che si adatta alla grandezza: scegli tu cosa mostrare</string>
     <string name="widget_large">Meteo grande: prossime ore e prossimi giorni</string>
+    <string name="widget_mini">Solo icona e temperatura</string>
+    <string name="widget_radar">Radar della Protezione Civile intorno a te</string>
     <string name="widget_small_label">MLMeteo piccolo</string>
-    <string name="widget_medium_label">MLMeteo medio</string>
+    <string name="widget_medium_label">MLMeteo</string>
     <string name="widget_large_label">MLMeteo grande</string>
+    <string name="widget_mini_label">MLMeteo Mini</string>
+    <string name="widget_radar_label">MLMeteo Radar</string>
 </resources>

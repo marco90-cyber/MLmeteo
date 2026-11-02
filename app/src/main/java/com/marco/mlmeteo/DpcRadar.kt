@@ -114,6 +114,16 @@ object DpcRadar {
         frames + future
     }
 
+    /** Solo l'ultima immagine del radar (per il widget). */
+    suspend fun latest(): Frame = withContext(Dispatchers.IO) {
+        val t = lastTime()
+        val b = downloadTif(t) ?: throw IOException("Radar non disponibile")
+        Frame(t, quantize(decodeTiff(b), mapping), false)
+    }
+
+    /** Colore (ARGB) del valore quantizzato [q]. */
+    fun colorOf(q: Int): Int = palette[q and 0xFF]
+
     // ------------------------------------------------------------------ TIFF
 
     class Raster(val w: Int, val h: Int, val data: FloatArray, val originX: Double, val originY: Double, val px: Double, val py: Double)

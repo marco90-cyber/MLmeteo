@@ -1,5 +1,7 @@
 package com.marco.mlmeteo
 
+import android.content.Intent
+
 import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -24,7 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 
-enum class Screen { HOME, SOURCES, PLACES, SETTINGS, APPEARANCE, HOME_ITEMS, UNITS, NOTIFICATIONS, API_KEYS, INFO, RADAR }
+enum class Screen { HOME, SOURCES, PLACES, SETTINGS, APPEARANCE, HOME_ITEMS, UNITS, NOTIFICATIONS, API_KEYS, INFO, RADAR, WIDGETS }
 
 object Nav {
     val stack = mutableStateListOf(Screen.HOME)
@@ -42,6 +44,18 @@ class MainActivity : ComponentActivity() {
         Notify.createChannels(this)
         Background.schedule(this)
         setContent { Root() }
+        openFrom(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openFrom(intent)
+    }
+
+    /** Il widget può chiedere di aprire direttamente il radar. */
+    private fun openFrom(i: Intent?) {
+        if (i?.getStringExtra("open") == "radar" && Nav.stack.lastOrNull() != Screen.RADAR) Nav.go(Screen.RADAR)
+        i?.removeExtra("open")
     }
 
     override fun onResume() {
@@ -100,6 +114,7 @@ fun Root() {
                     Screen.API_KEYS -> ApiKeysScreen()
                     Screen.INFO -> InfoScreen()
                     Screen.RADAR -> RadarScreen()
+                    Screen.WIDGETS -> WidgetsScreen()
                 }
             }
             AppUpdateHost()

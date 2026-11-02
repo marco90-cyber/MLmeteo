@@ -10,6 +10,6 @@
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_image"
     android:configure="com.marco.mlmeteo.WidgetConfigActivity"
-    android:widgetFeatures="reconfigurable|configuration_optional"
+    android:widgetFeatures="reconfigurable|configuration_optional|hide_from_picker"
     android:widgetCategory="home_screen"
     android:description="@string/widget_small" />

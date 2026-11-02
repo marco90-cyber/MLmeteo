@@ -75,7 +75,10 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         if (s.useGps && Locator.hasBackground(ctx)) try { Locator.update(ctx) } catch (e: Exception) { }
         val places = (listOfNotNull(Prefs.loadGps(ctx).takeIf { s.useGps }) + Prefs.loadPlaces(ctx))
         val main = places.firstOrNull { it.id == s.mainPlaceId } ?: places.firstOrNull()
-        if (main == null) { Widgets.refreshDone(ctx); Widgets.updateAll(ctx); return Result.success() }
+        if (main == null) {
+            try { RadarWidgetData.prepare(ctx) } catch (e: Exception) { }
+            Widgets.refreshDone(ctx); Widgets.updateAll(ctx); return Result.success()
+        }
         val wanted = (Widgets.placeIds(ctx) + main.id).toSet()
         val source = Sources.byId(s.sourceId)
         for (p in places.filter { it.id in wanted }) {
@@ -85,6 +88,12 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 if (p.id == main.id) Notify.statusBar(ctx, p, f, s)
             } catch (e: Exception) { }
         }
+        // allerte e qualità dell'aria per i widget, radar per il widget radar
+        for (p in places.filter { it.id in wanted }) {
+            try { WidgetStore.saveAlertLevel(ctx, p.id, AlertsRepo.forPlace(p)) } catch (e: Exception) { }
+            try { WeatherRepo.airQuality(p)?.let { WidgetStore.saveAir(ctx, p.id, it.aqi) } } catch (e: Exception) { }
+        }
+        try { RadarWidgetData.prepare(ctx) } catch (e: Exception) { }
         Widgets.refreshDone(ctx)
         Widgets.updateAll(ctx)
         if (s.notifAlerts) try { Notify.alerts(ctx, main, AlertsRepo.forPlace(main, force = true), s) } catch (e: Exception) { }

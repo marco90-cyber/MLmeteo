@@ -73,6 +73,28 @@
                 android:resource="@xml/widget_large" />
         </receiver>
         <receiver
+            android:name=".WidgetMini"
+            android:exported="true"
+            android:label="@string/widget_mini_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_mini" />
+        </receiver>
+        <receiver
+            android:name=".WidgetRadar"
+            android:exported="true"
+            android:label="@string/widget_radar_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_radar" />
+        </receiver>
+        <receiver
             android:name=".WidgetRefreshReceiver"
             android:exported="false" />
         <!-- Aggiornamenti in app: l'APK scaricato viene passato all'installatore -->

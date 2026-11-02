@@ -136,7 +136,7 @@ fun SettingsScreen() {
             SettingRow("Notifiche", "Allerte, pioggia in arrivo, previsione del mattino", Icons.Filled.Notifications,
                 onClick = { Nav.go(Screen.NOTIFICATIONS) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
-            SettingRow("Widget", "Tieni premuto sulla schermata Home → Widget → MLMeteo (3 dimensioni)", Icons.Filled.Widgets)
+            SettingRow("Widget", "I tuoi widget: modifica località, contenuto e aspetto", Icons.Filled.Widgets, onClick = { Nav.go(Screen.WIDGETS) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
             ChoiceRow(
                 "Aggiornamento in background", Icons.Filled.Refresh,

@@ -136,8 +136,9 @@ object AppState {
             } finally {
                 loading[p.id] = false
             }
-            WeatherRepo.airQuality(p)?.let { air[p.id] = it }
-            try { alerts[p.id] = AlertsRepo.forPlace(p) } catch (e: Exception) { }
+            WeatherRepo.airQuality(p)?.let { air[p.id] = it; WidgetStore.saveAir(app, p.id, it.aqi) }
+            try { alerts[p.id] = AlertsRepo.forPlace(p).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { }
+            Widgets.updateAll(app)
         }
     }
 
