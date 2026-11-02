@@ -248,48 +248,91 @@ object WeatherRepo {
         Sky.DRIZZLE -> 4; Sky.RAIN -> 5; Sky.SNOW -> 6; Sky.STORM -> 7
     }
 
-    /** Media delle fonti principali: temperature mediate, cielo = valore più frequente. */
+    /**
+     * Peso di ogni modello nel Multimodello, in base a quanto è lontano l'orario previsto.
+     * Nelle prime 48 ore contano di più i modelli ad alta risoluzione (ICON-2I, ECMWF, ICON),
+     * dal terzo giorno ECMWF e AIFS, che sono i più affidabili a lungo termine.
+     */
+    private fun weight(id: String, leadHours: Long): Double = when {
+        leadHours <= 48 -> when (id) {
+            "arpae" -> 3.0; "ecmwf" -> 2.5; "icon" -> 2.0; "ecmwf_aifs" -> 1.5; "meteofrance" -> 1.5; else -> 1.0
+        }
+        leadHours <= 96 -> when (id) {
+            "ecmwf" -> 3.0; "ecmwf_aifs" -> 2.5; "icon" -> 1.5; else -> 1.0
+        }
+        else -> when (id) {
+            "ecmwf" -> 3.0; "ecmwf_aifs" -> 3.0; else -> 1.0
+        }
+    }
+
+    /** Multimodello: media pesata dei modelli migliori per l'Italia; pioggia con la mediana pesata. */
     private suspend fun consensus(place: Place): Forecast = coroutineScope {
         val members = Sources.consensusMembers.map { Sources.byId(it) }
-        val results = members.map { s ->
+        val results: List<Pair<String, Forecast>> = members.map { s ->
             async(Dispatchers.IO) {
                 try {
-                    if (s.kind == SourceKind.METNO) metno(place) else openMeteo(place, s.model, s.short).forecast
+                    s.id to (if (s.kind == SourceKind.METNO) metno(place) else openMeteo(place, s.model, s.short).forecast)
                 } catch (e: Exception) { null }
             }
         }.awaitAll().filterNotNull()
         if (results.isEmpty()) throw IOException("Nessuna fonte disponibile")
-        val base = results.first()
-        fun avg(xs: List<Double>) = xs.filter { it.ok() }.let { if (it.isEmpty()) Double.NaN else it.average() }
-        fun mode(xs: List<Int>) = xs.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 3
+        // la base è il modello che arriva più lontano (di solito ECMWF)
+        val base = results.maxByOrNull { it.second.hours.size + it.second.days.size * 100 }!!.second
+        val now = base.localNow
+
+        fun wavg(xs: List<Pair<Double, Double>>): Double {
+            val ok = xs.filter { it.first.ok() }
+            val w = ok.sumOf { it.second }
+            return if (ok.isEmpty() || w <= 0) Double.NaN else ok.sumOf { it.first * it.second } / w
+        }
+        fun wmedian(xs: List<Pair<Double, Double>>): Double {
+            val ok = xs.filter { it.first.ok() }.sortedBy { it.first }
+            if (ok.isEmpty()) return Double.NaN
+            val half = ok.sumOf { it.second } / 2
+            var acc = 0.0
+            for ((v, w) in ok) { acc += w; if (acc >= half) return v }
+            return ok.last().first
+        }
+        fun wmode(xs: List<Pair<Int, Double>>): Int =
+            xs.groupBy { it.first }.mapValues { e -> e.value.sumOf { it.second } }.maxByOrNull { it.value }?.key ?: 3
+
+        val w0 = results.map { weight(it.first, 0) }
+        val curs = results.map { it.second.current }
+        val okCur = curs.indices.filter { curs[it].temp.ok() }
         val cur = base.current.copy(
-            temp = avg(results.map { it.current.temp }),
-            feels = avg(results.map { it.current.feels }),
-            code = mode(results.map { it.current.code }),
-            humidity = avg(results.map { it.current.humidity }),
-            windSpeed = avg(results.map { it.current.windSpeed }),
-            pressure = avg(results.map { it.current.pressure }),
+            temp = wavg(curs.indices.map { curs[it].temp to w0[it] }),
+            feels = wavg(curs.indices.map { curs[it].feels to w0[it] }),
+            code = wmode(okCur.map { curs[it].code to w0[it] }),
+            humidity = wavg(curs.indices.map { curs[it].humidity to w0[it] }),
+            windSpeed = wavg(curs.indices.map { curs[it].windSpeed to w0[it] }),
+            pressure = wavg(curs.indices.map { curs[it].pressure to w0[it] }),
         )
         val hours = base.hours.map { h ->
-            val same = results.mapNotNull { r -> r.hours.firstOrNull { it.time == h.time } }
-            h.copy(
-                temp = avg(same.map { it.temp }),
-                code = mode(same.map { it.code }),
-                precipProb = avg(same.map { it.precipProb }),
-                precip = avg(same.map { it.precip }),
+            val lead = java.time.Duration.between(now, h.time).toHours().coerceAtLeast(0)
+            val same = results.mapNotNull { (id, f) ->
+                f.hours.firstOrNull { it.time == h.time }?.takeIf { it.temp.ok() }?.let { it to weight(id, lead) }
+            }
+            if (same.isEmpty()) h else h.copy(
+                temp = wavg(same.map { it.first.temp to it.second }),
+                code = wmode(same.map { it.first.code to it.second }),
+                precipProb = wavg(same.map { it.first.precipProb to it.second }),
+                precip = wmedian(same.map { it.first.precip to it.second }),
             )
         }
         val days = base.days.map { d ->
-            val same = results.mapNotNull { r -> r.days.firstOrNull { it.date == d.date } }
-            d.copy(
-                tMax = avg(same.map { it.tMax }),
-                tMin = avg(same.map { it.tMin }),
-                code = mode(same.map { it.code }),
-                precipProb = avg(same.map { it.precipProb }),
-                precipSum = avg(same.map { it.precipSum }),
+            val lead = java.time.Duration.between(now.toLocalDate().atStartOfDay(), d.date.atStartOfDay()).toHours().coerceAtLeast(0) + 12
+            val same = results.mapNotNull { (id, f) ->
+                f.days.firstOrNull { it.date == d.date }?.takeIf { it.tMax.ok() }?.let { it to weight(id, lead) }
+            }
+            if (same.isEmpty()) d else d.copy(
+                tMax = wavg(same.map { it.first.tMax to it.second }),
+                tMin = wavg(same.map { it.first.tMin to it.second }),
+                code = wmode(same.map { it.first.code to it.second }),
+                precipProb = wavg(same.map { it.first.precipProb to it.second }),
+                precipSum = wmedian(same.map { it.first.precipSum to it.second }),
             )
         }
-        Forecast(cur, hours, days, "Consenso (${results.size} fonti)", System.currentTimeMillis(), base.localNow)
+        Forecast(cur, hours, days, "Multimodello (${results.size} modelli)", System.currentTimeMillis(), base.localNow)
     }
 
     /** Temperatura e cielo attuali di ogni fonte, per la pagina "Fonte dati". */

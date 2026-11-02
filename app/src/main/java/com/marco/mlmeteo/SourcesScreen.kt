@@ -50,7 +50,7 @@ fun SourcesScreen() {
     Page("Fonte dati") {
         Hint("La fonte scelta vale per tutte le località." + (place?.let { " Temperature attuali a ${it.name}." } ?: ""))
 
-        val cons = compare?.values?.filterNotNull()?.map { it.first }?.takeIf { it.isNotEmpty() }?.average()
+        val cons = compare?.filterKeys { it in Sources.consensusMembers }?.values?.filterNotNull()?.map { it.first }?.takeIf { it.isNotEmpty() }?.average()
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                 .background(if (s.sourceId == "consensus") c.accentContainer.copy(alpha = 0.5f) else c.card)
@@ -59,8 +59,8 @@ fun SourcesScreen() {
         ) {
             RadioButton(selected = s.sourceId == "consensus", onClick = { pick("consensus") })
             Column(Modifier.weight(1f)) {
-                Text("Consenso", color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text("Media di ECMWF, ICON, Météo-France, Met Office, GFS e YR.no", color = c.inkDim, fontSize = 13.sp)
+                Text("Multimodello", color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("Media pesata di ECMWF, AIFS, ICON, ItaliaMeteo, Météo-France e Met Office: nelle prime 48 ore pesano di più i modelli ad alta risoluzione, poi ECMWF", color = c.inkDim, fontSize = 13.sp)
             }
             Text(cons?.let { fmt.temp(it) } ?: "", color = c.ink, fontSize = 28.sp, modifier = Modifier.padding(end = 8.dp))
         }

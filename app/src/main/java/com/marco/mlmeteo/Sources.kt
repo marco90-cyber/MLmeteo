@@ -16,7 +16,7 @@ data class Source(
 )
 
 object Sources {
-    val consensus = Source("consensus", "Consenso", "Consenso", "Media di tutte le fonti gratuite", SourceKind.CONSENSUS)
+    val consensus = Source("consensus", "Multimodello", "Multimodello", "Media pesata dei modelli migliori", SourceKind.CONSENSUS)
 
     val free = listOf(
         Source("ecmwf", "ECMWF (Centro Europeo)", "ECMWF", "Mondo · IFS 0,25°", SourceKind.OPEN_METEO, "ecmwf_ifs025"),
@@ -46,8 +46,8 @@ object Sources {
         Source("tomorrow", "Tomorrow.io", "Tomorrow.io", "Richiede chiave API", SourceKind.API_KEY),
     )
 
-    /** Fonti usate per calcolare il Consenso (globali, veloci). */
-    val consensusMembers = listOf("ecmwf", "icon", "meteofrance", "ukmo", "gfs", "metno")
+    /** Modelli usati dal Multimodello (pesi in WeatherRepo.weight). */
+    val consensusMembers = listOf("ecmwf", "ecmwf_aifs", "icon", "arpae", "meteofrance", "ukmo")
 
     fun byId(id: String): Source = (listOf(consensus) + free + keyed).firstOrNull { it.id == id } ?: free.first()
 }
