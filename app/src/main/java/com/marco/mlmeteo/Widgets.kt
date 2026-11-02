@@ -404,34 +404,88 @@ object Widgets {
             return Rendered(p.bmp, listOf("main" to hDp.toFloat()))
         }
 
+        // ---------------- piano: cosa entra, in ordine di priorità
+        // meteo attuale → prossime ore → dati extra → pioggia → giorni
+        val ex = extrasFor(ctx, cfg, place, f)
+        // con il widget largo i dati extra vanno a destra della temperatura (spazio che altrimenti resta vuoto)
+        val sideExtras = cfg.showCurrent && ex.isNotEmpty() && wDp >= 290
+        val icDp = if (hDp < 170) 52f else 64f
+        val headerDp = 16f + (if (cfg.showUpdated || sideExtras) 16f else 0f) + 8f
+        var free = hDp - (pad / p.scale) - headerDp - (if (cfg.showCurrent) icDp + 10f else 0f) - 6f
+        val hrs24 = f.hours.take(24)
+        val anyRain = hrs24.any { (it.precip.ok() && it.precip >= 0.1) || (it.precipProb.ok() && it.precipProb >= 20) }
+        var hoursDp = 0f
+        if (cfg.showHours) {
+            if (free >= 88f) hoursDp = 78f else if (free >= 68f) hoursDp = 60f
+            if (hoursDp > 0) free -= hoursDp + 10f
+        }
+        var extrasRow = false
+        if (!sideExtras && ex.isNotEmpty() && free >= 38f) { extrasRow = true; free -= 38f }
+        var rainDp = 0f
+        if (cfg.showRain && hrs24.isNotEmpty()) {
+            val want = if (anyRain) 76f else 30f
+            if (free >= want + 10f) { rainDp = want; free -= want + 10f }
+        }
+        var dayRows = 0
+        if (cfg.showDays && free >= 30f) { dayRows = (free / 30f).toInt().coerceAtMost(f.days.size.coerceAtMost(16)); free -= dayRows * 30f }
+        // lo spazio che avanza viene diviso tra le parti
+        val parts = listOf(cfg.showCurrent, hoursDp > 0, extrasRow, rainDp > 0, dayRows > 0).count { it }
+        val gap = dp((free / (parts + 1)).coerceIn(0f, 16f))
+
         // --- intestazione
-        var y = pad + dp(16f)
+        var y = pad + dp(16f) + gap / 2
         val nameP = p.text(16f, c.ink, true)
         cv.drawText(p.fit(nameP, place.name, w - pad * 2 - refreshSpace - dp(28f)), pad, y, nameP)
-        if (cfg.showUpdated) {
+        if (sideExtras) {
+            y += dp(16f)
+            val sub = listOfNotNull(
+                conditionText(cur.code, cur.isDay),
+                "${fmt.temp(today?.tMax ?: Double.NaN)}/${fmt.temp(today?.tMin ?: Double.NaN)}",
+                if (cfg.showUpdated) updTxt.lowercase().replaceFirstChar { it } else null,
+            ).joinToString(" · ")
+            cv.drawText(p.fit(p.text(12f, c.inkDim), sub, w - pad * 2 - refreshSpace), pad, y, p.text(12f, c.inkDim))
+        } else if (cfg.showUpdated) {
             y += dp(16f)
             cv.drawText(updTxt, pad, y, p.text(11f, c.inkDim))
         }
-        y += dp(8f)
+        y += dp(8f) + gap
         if (cfg.showCurrent) {
-            val ic = (if (hDp < 160) dp(52f) else dp(64f)).toInt()
+            val ic = dp(icDp).toInt()
             cv.drawBitmap(icon(cur.code, cur.isDay, ic, s.iconSet, c), pad, y, null)
-            val tp = p.text(if (hDp < 160) 36f else 44f, c.ink, true)
+            val tp = p.text(if (hDp < 170) 36f else 44f, c.ink, true)
             val tX = pad + ic + dp(12f)
             cv.drawText(fmt.temp(cur.temp), tX, y + ic * 0.72f, tp)
             val tx = tX + tp.measureText(fmt.temp(cur.temp)) + dp(14f)
             val availR = w - tx - pad
-            if (availR > dp(70f)) {
+            if (sideExtras) {
+                // griglia 2×2 (o 1 colonna se lo spazio è poco)
+                var cols = if (ex.size >= 2 && availR / 2 >= dp(76f)) 2 else 1
+                if (availR < dp(70f)) cols = 0
+                if (cols > 0) {
+                    val rows = 2
+                    val n = (cols * rows).coerceAtMost(ex.size)
+                    val cw = availR / cols
+                    val ch = (ic - dp(6f)) / 2
+                    ex.take(n).forEachIndexed { i, (iv, v) ->
+                        val col = i % cols; val row = i / cols
+                        val x0 = tx + cw * col; val y0 = y + row * (ch + dp(6f))
+                        p.pill(x0 + dp(2f), y0, x0 + cw - dp(2f), y0 + ch, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
+                        val isz = (ch * 0.58f).coerceAtMost(dp(16f))
+                        drawVector(cv, iv, x0 + dp(9f), y0 + (ch - isz) / 2, isz, c.accent.toArgb())
+                        val tpe = p.text(12f, c.ink)
+                        cv.drawText(p.fit(tpe, v, cw - isz - dp(20f)), x0 + dp(13f) + isz, y0 + ch / 2 + dp(4.5f), tpe)
+                    }
+                }
+            } else if (availR > dp(70f)) {
                 cv.drawText(p.fit(p.text(14f, c.ink), conditionText(cur.code, cur.isDay), availR), tx, y + ic * 0.42f, p.text(14f, c.ink))
                 cv.drawText(p.fit(p.text(12f, c.inkDim), "Max ${fmt.temp(today?.tMax ?: Double.NaN)} · Min ${fmt.temp(today?.tMin ?: Double.NaN)}", availR),
                     tx, y + ic * 0.72f, p.text(12f, c.inkDim))
             }
-            y += ic + dp(10f)
+            y += ic + dp(10f) + gap
         }
 
-        // --- dati extra (una riga di icone con il valore)
-        val ex = extrasFor(ctx, cfg, place, f)
-        if (ex.isNotEmpty() && y + dp(30f) <= h - dp(6f)) {
+        // --- dati extra in riga (widget stretti)
+        fun extrasLine() {
             val n = ((w - pad * 2) / dp(74f)).toInt().coerceIn(1, ex.size)
             val colW = (w - pad * 2) / n
             ex.take(n).forEachIndexed { i, (iv, v) ->
@@ -440,78 +494,72 @@ object Widgets {
                 drawVector(cv, iv, x0 + dp(10f), y + dp(6f), dp(16f), c.accent.toArgb())
                 cv.drawText(p.fit(p.text(12f, c.ink), v, colW - dp(36f)), x0 + dp(30f), y + dp(19f), p.text(12f, c.ink))
             }
-            y += dp(28f) + dp(10f)
+            y += dp(28f) + dp(10f) + gap
         }
-        closeZone("main", y)
+        if (extrasRow) extrasLine()
+        closeZone("main", y - gap / 2)
 
         // --- prossime ore
-        val hoursH = dp(78f)
-        if (cfg.showHours && y + hoursH <= h - dp(6f)) {
-            val n = ((w - pad * 2) / dp(52f)).toInt().coerceIn(3, 10)
+        if (hoursDp > 0) {
+            val hoursH = dp(hoursDp)
+            val small = hoursDp < 70f
+            val n = ((w - pad * 2) / dp(if (small) 46f else 52f)).toInt().coerceIn(3, 12)
             val colW = (w - pad * 2) / n
             f.hours.take(n).forEachIndexed { i, hr ->
                 val cx = pad + colW * i + colW / 2
                 if (i == 0) p.pill(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hoursH, c.accentContainer)
                 val ink = if (i == 0) c.onAccentContainer else c.ink
-                cv.drawText(if (i == 0) "Ora" else fmt.hourLabel(hr.time), cx, y + dp(16f), p.text(11f, if (i == 0) ink else c.inkDim, align = Paint.Align.CENTER))
-                val hi = dp(26f).toInt()
-                cv.drawBitmap(icon(hr.code, hr.isDay, hi, s.iconSet, c), cx - hi / 2f, y + dp(22f), null)
-                cv.drawText(fmt.temp(if (i == 0) cur.temp else hr.temp), cx, y + dp(66f), p.text(13f, ink, true, Paint.Align.CENTER))
+                cv.drawText(if (i == 0) "Ora" else fmt.hourLabel(hr.time), cx, y + dp(if (small) 14f else 16f), p.text(11f, if (i == 0) ink else c.inkDim, align = Paint.Align.CENTER))
+                val hi = dp(if (small) 20f else 26f).toInt()
+                cv.drawBitmap(icon(hr.code, hr.isDay, hi, s.iconSet, c), cx - hi / 2f, y + dp(if (small) 19f else 22f), null)
+                cv.drawText(fmt.temp(if (i == 0) cur.temp else hr.temp), cx, y + dp(if (small) 53f else 66f), p.text(13f, ink, true, Paint.Align.CENTER))
             }
-            y += hoursH + dp(10f)
-            closeZone("hours", y)
+            y += hoursH + dp(10f) + gap
+            closeZone("hours", y - gap / 2)
         }
 
         // --- grafico della pioggia (prossime ore)
-        if (cfg.showRain) {
-            val hrs = f.hours.take(24)
-            val any = hrs.any { (it.precip.ok() && it.precip >= 0.1) || (it.precipProb.ok() && it.precipProb >= 20) }
-            val chartH = if (any) dp(76f) else dp(30f)
-            if (hrs.isNotEmpty() && y + chartH <= h - dp(6f)) {
-                if (!any) {
-                    drawVector(cv, Icons.Filled.WaterDrop, pad, y + dp(4f), dp(16f), c.accent.toArgb())
-                    cv.drawText("Niente pioggia nelle prossime 24 ore", pad + dp(22f), y + dp(17f), p.text(12f, c.inkDim))
-                } else {
-                    val total = hrs.sumOf { if (it.precip.ok()) it.precip else 0.0 }
-                    cv.drawText("Pioggia prossime ${hrs.size} ore", pad, y + dp(13f), p.text(12f, c.ink, true))
-                    cv.drawText(fmt.rain(total), w - pad, y + dp(13f), p.text(12f, c.accent, true, Paint.Align.RIGHT))
-                    val top = y + dp(20f); val bottom = y + dp(60f)
-                    val maxMm = hrs.maxOf { if (it.precip.ok()) it.precip else 0.0 }.coerceAtLeast(2.0)
-                    val hasProb = hrs.any { it.precipProb.ok() }
-                    val bw = (w - pad * 2) / hrs.size
-                    val probP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accent.copy(alpha = 0.18f).toArgb() }
-                    val mmP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accent.toArgb() }
-                    hrs.forEachIndexed { i, hr ->
-                        val x0 = pad + bw * i + bw * 0.15f; val x1 = pad + bw * (i + 1) - bw * 0.15f
-                        if (hasProb && hr.precipProb.ok() && hr.precipProb > 0) {
-                            val ph = ((hr.precipProb / 100.0) * (bottom - top)).toFloat()
-                            cv.drawRoundRect(RectF(x0, bottom - ph, x1, bottom), dp(2f), dp(2f), probP)
-                        }
-                        val v = if (hr.precip.ok()) hr.precip else 0.0
-                        if (v > 0) {
-                            val bh = (v / maxMm * (bottom - top)).toFloat().coerceAtLeast(dp(2f))
-                            cv.drawRoundRect(RectF(x0, bottom - bh, x1, bottom), dp(2f), dp(2f), mmP)
-                        }
+        if (rainDp > 0) {
+            val hrs = hrs24
+            if (!anyRain) {
+                drawVector(cv, Icons.Filled.WaterDrop, pad, y + dp(4f), dp(16f), c.accent.toArgb())
+                cv.drawText("Niente pioggia nelle prossime 24 ore", pad + dp(22f), y + dp(17f), p.text(12f, c.inkDim))
+            } else {
+                val total = hrs.sumOf { if (it.precip.ok()) it.precip else 0.0 }
+                cv.drawText("Pioggia prossime ${hrs.size} ore", pad, y + dp(13f), p.text(12f, c.ink, true))
+                cv.drawText(fmt.rain(total), w - pad, y + dp(13f), p.text(12f, c.accent, true, Paint.Align.RIGHT))
+                val top = y + dp(20f); val bottom = y + dp(60f)
+                val maxMm = hrs.maxOf { if (it.precip.ok()) it.precip else 0.0 }.coerceAtLeast(2.0)
+                val hasProb = hrs.any { it.precipProb.ok() }
+                val bw = (w - pad * 2) / hrs.size
+                val probP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accent.copy(alpha = 0.18f).toArgb() }
+                val mmP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accent.toArgb() }
+                hrs.forEachIndexed { i, hr ->
+                    val x0 = pad + bw * i + bw * 0.15f; val x1 = pad + bw * (i + 1) - bw * 0.15f
+                    if (hasProb && hr.precipProb.ok() && hr.precipProb > 0) {
+                        val ph = ((hr.precipProb / 100.0) * (bottom - top)).toFloat()
+                        cv.drawRoundRect(RectF(x0, bottom - ph, x1, bottom), dp(2f), dp(2f), probP)
                     }
-                    val lbl = p.text(10f, c.inkDim)
-                    for (i in listOf(0, hrs.size / 2, hrs.size - 1)) {
-                        val al = when (i) { 0 -> Paint.Align.LEFT; hrs.size - 1 -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
-                        val x = when (i) { 0 -> pad; hrs.size - 1 -> w - pad; else -> pad + bw * i + bw / 2 }
-                        cv.drawText(if (i == 0) "Ora" else fmt.hourLabel(hrs[i].time), x, bottom + dp(13f), p.text(10f, c.inkDim, align = al))
+                    val v = if (hr.precip.ok()) hr.precip else 0.0
+                    if (v > 0) {
+                        val bh = (v / maxMm * (bottom - top)).toFloat().coerceAtLeast(dp(2f))
+                        cv.drawRoundRect(RectF(x0, bottom - bh, x1, bottom), dp(2f), dp(2f), mmP)
                     }
-                    @Suppress("UNUSED_VARIABLE") val unused = lbl
                 }
-                y += chartH + dp(10f)
-                closeZone("rain", y)
+                for (i in listOf(0, hrs.size / 2, hrs.size - 1)) {
+                    val al = when (i) { 0 -> Paint.Align.LEFT; hrs.size - 1 -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
+                    val x = when (i) { 0 -> pad; hrs.size - 1 -> w - pad; else -> pad + bw * i + bw / 2 }
+                    cv.drawText(if (i == 0) "Ora" else fmt.hourLabel(hrs[i].time), x, bottom + dp(13f), p.text(10f, c.inkDim, align = al))
+                }
             }
+            y += dp(rainDp) + dp(10f) + gap
+            closeZone("rain", y - gap / 2)
         }
 
         // --- prossimi giorni (quanti ne entrano)
         val rowH = dp(30f)
-        if (cfg.showDays && y + rowH <= h - dp(4f)) {
-            val days = f.days.take(16)
-            val shown = ((h - dp(4f) - y) / rowH).toInt().coerceIn(0, days.size)
-            val list = days.take(shown)
+        if (dayRows > 0) {
+            val list = f.days.take(dayRows)
             val lo = list.minOfOrNull { it.tMin } ?: 0.0
             val hi = list.maxOfOrNull { it.tMax } ?: 1.0
             val span = (hi - lo).coerceAtLeast(1.0)
