@@ -112,7 +112,8 @@ fun MLTheme(s: Settings, tint: Color?, content: @Composable () -> Unit) {
             outline = c.outline, outlineVariant = c.outline,
         )
     }
-    CompositionLocalProvider(LocalAppColors provides c) {
+    val switchStyle = com.marco.mltheme.MLThemeSettings.get(LocalContext.current).switchStyle
+    CompositionLocalProvider(LocalAppColors provides c, com.marco.mltheme.LocalSwitchStyle provides switchStyle) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }

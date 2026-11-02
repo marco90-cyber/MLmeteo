@@ -81,16 +81,26 @@ fun CardBox(modifier: Modifier = Modifier, padding: Int = 16, content: @Composab
     )
 }
 
-/** Gruppo di righe impostazioni dentro una card, con separatori. */
+/** true dentro un [Group]: i separatori diventano lo stacco tra le schede, come in MLauncher. */
+private val LocalInGroup = androidx.compose.runtime.compositionLocalOf { false }
+
+/** Gruppo di righe impostazioni nello stile di MLauncher (MLTheme): angoli da 28 dp, voci separate da un filo di spazio. */
 @Composable
 fun Group(content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAppColors.current
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card).padding(vertical = 4.dp), content = content)
+    androidx.compose.runtime.CompositionLocalProvider(LocalInGroup provides true) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.card), content = content)
+    }
 }
 
 @Composable
 fun Divider() {
-    HorizontalDivider(color = LocalAppColors.current.outline.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 16.dp))
+    if (LocalInGroup.current) {
+        // separé di MLauncher: stacco di 2 dp del colore della pagina
+        Box(Modifier.fillMaxWidth().height(2.dp).background(LocalAppColors.current.bg))
+    } else {
+        HorizontalDivider(color = LocalAppColors.current.outline.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 16.dp))
+    }
 }
 
 @Composable
@@ -130,7 +140,9 @@ fun SettingRow(
 @Composable
 fun SwitchRow(title: String, subtitle: String? = null, icon: ImageVector? = null, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     SettingRow(title, subtitle, icon, enabled, onClick = { onChange(!checked) }) {
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        androidx.compose.runtime.CompositionLocalProvider(com.marco.mltheme.LocalPrefEnabled provides enabled) {
+            com.marco.mltheme.MLSwitch(checked = checked, onCheckedChange = onChange)
+        }
     }
 }
 

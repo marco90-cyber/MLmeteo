@@ -81,7 +81,7 @@ fun SettingsScreen() {
     Page("Impostazioni") {
         SectionTitle("Fonti dati")
         Group {
-            SettingRow("Dati meteo", Sources.byId(s.sourceId).name, Icons.Filled.CloudQueue, onClick = { Nav.go(Screen.SOURCES) })
+            SettingRow("Dati meteo", Sources.byId(s.sourceId).name, Icons.Filled.CloudQueue, onClick = { Nav.go(Screen.SOURCES) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
             RadarSourceRow()
             Divider()
@@ -99,12 +99,12 @@ fun SettingsScreen() {
                 s.icon2iHours.toString(),
             ) { v -> AppState.update { it.copy(icon2iHours = v.toInt()) } }
             Divider()
-            SettingRow("Chiavi API", "OpenWeatherMap, WeatherAPI, AccuWeather…", Icons.Filled.Key, onClick = { Nav.go(Screen.API_KEYS) })
+            SettingRow("Chiavi API", "OpenWeatherMap, WeatherAPI, AccuWeather…", Icons.Filled.Key, onClick = { Nav.go(Screen.API_KEYS) }, trailing = { com.marco.mltheme.MLChevron() })
         }
 
         SectionTitle("Località")
         Group {
-            SettingRow("Gestisci località", "${AppState.savedPlaces.size} salvate", Icons.Filled.Place, onClick = { Nav.go(Screen.PLACES) })
+            SettingRow("Gestisci località", "${AppState.savedPlaces.size} salvate", Icons.Filled.Place, onClick = { Nav.go(Screen.PLACES) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
             SwitchRow("Usa posizione GPS", "Mostra il meteo dove ti trovi", Icons.Filled.MyLocation, checked = s.useGps) { v ->
                 AppState.update { it.copy(useGps = v) }
@@ -119,22 +119,22 @@ fun SettingsScreen() {
         SectionTitle("Aspetto")
         Group {
             SettingRow("Tema e colori", if (s.useWallpaper) "Colori dallo sfondo" else "Colore manuale", Icons.Filled.Palette,
-                onClick = { Nav.go(Screen.APPEARANCE) })
+                onClick = { Nav.go(Screen.APPEARANCE) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
-            SettingRow("Set di icone", IconSetNames[s.iconSet.coerceIn(0, 5)].first, Icons.Filled.Brush, onClick = { Nav.go(Screen.APPEARANCE) })
+            SettingRow("Set di icone", IconSetNames[s.iconSet.coerceIn(0, 5)].first, Icons.Filled.Brush, onClick = { Nav.go(Screen.APPEARANCE) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
-            SettingRow("Elementi della Home", "Scegli cosa vedere e in che ordine", Icons.Filled.Dashboard, onClick = { Nav.go(Screen.HOME_ITEMS) })
+            SettingRow("Elementi della Home", "Scegli cosa vedere e in che ordine", Icons.Filled.Dashboard, onClick = { Nav.go(Screen.HOME_ITEMS) }, trailing = { com.marco.mltheme.MLChevron() })
         }
 
         SectionTitle("Unità")
         Group {
-            SettingRow("Unità di misura", "Temperatura, vento, pioggia, pressione…", Icons.Filled.Straighten, onClick = { Nav.go(Screen.UNITS) })
+            SettingRow("Unità di misura", "Temperatura, vento, pioggia, pressione…", Icons.Filled.Straighten, onClick = { Nav.go(Screen.UNITS) }, trailing = { com.marco.mltheme.MLChevron() })
         }
 
         SectionTitle("Notifiche e widget")
         Group {
             SettingRow("Notifiche", "Allerte, pioggia in arrivo, previsione del mattino", Icons.Filled.Notifications,
-                onClick = { Nav.go(Screen.NOTIFICATIONS) })
+                onClick = { Nav.go(Screen.NOTIFICATIONS) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
             SettingRow("Widget", "Tieni premuto sulla schermata Home → Widget → MLMeteo (3 dimensioni)", Icons.Filled.Widgets)
             Divider()
@@ -151,7 +151,7 @@ fun SettingsScreen() {
 
         SectionTitle("Info")
         Group {
-            SettingRow("Informazioni", "Versione, aggiornamenti, crediti", Icons.Filled.Info, onClick = { Nav.go(Screen.INFO) })
+            SettingRow("Informazioni", "Versione, aggiornamenti, crediti", Icons.Filled.Info, onClick = { Nav.go(Screen.INFO) }, trailing = { com.marco.mltheme.MLChevron() })
         }
     }
 }
@@ -194,6 +194,14 @@ fun AppearanceScreen() {
                     s.mode,
                 ) { m -> AppState.update { it.copy(mode = m) } }
             }
+            Divider()
+            val ml = com.marco.mltheme.MLThemeSettings.get(androidx.compose.ui.platform.LocalContext.current)
+            com.marco.mltheme.MLChoiceRow(
+                "Stile degli interruttori",
+                com.marco.mltheme.SWITCH_STYLES,
+                ml.switchStyle,
+                preview = { com.marco.mltheme.SwitchStylePreview(it) },
+            ) { ml.switchStyle = it }
             Divider()
             SwitchRow("Sfumatura in base al meteo", "Più calda col sole, più fredda con la pioggia", checked = s.weatherTint) { v ->
                 AppState.update { it.copy(weatherTint = v) }
@@ -303,7 +311,7 @@ fun HomeItemsScreen() {
                     if (item.locked) {
                         Icon(Icons.Filled.Lock, contentDescription = "Sempre visibile", tint = c.inkDim, modifier = Modifier.padding(end = 12.dp))
                     } else {
-                        Switch(checked = item.id !in s.hidden, onCheckedChange = { v ->
+                        com.marco.mltheme.MLSwitch(checked = item.id !in s.hidden, onCheckedChange = { v ->
                             AppState.update { st -> st.copy(hidden = if (v) st.hidden - item.id else st.hidden + item.id) }
                         })
                     }
@@ -565,6 +573,6 @@ fun BackgroundLocationRow() {
             }
         },
     ) {
-        Switch(checked = granted, onCheckedChange = null)
+        com.marco.mltheme.MLSwitch(checked = granted, onCheckedChange = null)
     }
 }
