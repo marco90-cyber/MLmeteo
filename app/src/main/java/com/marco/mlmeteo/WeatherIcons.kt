@@ -15,18 +15,27 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** I 6 set di icone (disegnati dall'app, nessuna licenza esterna). */
-val IconSetNames = listOf(
-    "Material" to "Monocromatiche, colore del tema",
-    "Colorate" to "Piene e colorate",
-    "Contorno" to "Linee colorate",
-    "Glifi" to "Minimal, un solo colore",
-    "3D" to "Sfumate, effetto rilievo",
-    "Duotone" to "Due toni dallo sfondo",
+/** Set di icone (id, nome, descrizione). Tutte disegnate dall'app, nessuna licenza esterna. */
+val IconSets = listOf(
+    Triple(1, "Colorate", "Piene e colorate"),
+    Triple(4, "3D", "Sfumate, effetto rilievo"),
+    Triple(6, "Vivaci", "Nuvole bianche con il bordo, colori pieni"),
+    Triple(7, "Pastello", "Colori morbidi con un'ombra leggera"),
+    Triple(8, "Raggi tondi", "Sole con raggi spessi e arrotondati"),
+    Triple(9, "Morbido", "Nuvole sfumate dal bianco"),
+    Triple(10, "Contrasto", "Nuvole scure, sole arancione"),
+    Triple(11, "Due toni", "Nuvole chiare con la base più scura"),
 )
+
+fun iconSetName(id: Int) = IconSets.firstOrNull { it.first == id }?.second ?: "Colorate"
+
+/** I set tolti (Material, Contorno, Glifi, Duotone) diventano "Colorate". */
+fun validIconSet(id: Int) = if (IconSets.any { it.first == id }) id else 1
 
 @Composable
 fun WeatherIcon(code: Int, isDay: Boolean, size: Dp = 32.dp, set: Int = AppState.settings.iconSet, phase: Float = 0f, amp: Float = 0f) {
@@ -45,33 +54,81 @@ private class Pal(
     val stroke get() = Stroke(width = 2.6f * k, cap = StrokeCap.Round, join = StrokeJoin.Round)
 
     fun color(kind: String): Color = when (set) {
-        0, 5 -> accent
-        3 -> ink
+        6 -> when (kind) {
+            "sun", "bolt" -> Color(0xFFFFC531); "moon" -> Color(0xFFF4D77A); "drop" -> Color(0xFF3D8BFF)
+            "snow" -> Color(0xFFFFFFFF); "dark" -> Color(0xFF8C99A6); else -> Color(0xFFFFFFFF)
+        }
+        7 -> when (kind) {
+            "sun" -> Color(0xFFFFE29A); "bolt" -> Color(0xFFFFD98A); "moon" -> Color(0xFFFFF1B8); "drop" -> Color(0xFF9EC5FE)
+            "snow" -> Color(0xFFF2F5FA); "dark" -> Color(0xFFB7C0CE); else -> Color(0xFFF2F5FA)
+        }
+        8 -> when (kind) {
+            "sun", "bolt" -> Color(0xFFFFB300); "moon" -> Color(0xFFF4D77A); "drop" -> Color(0xFF4FA3FF)
+            "snow" -> Color(0xFFDDEEFF); "dark" -> Color(0xFF9AA6B2); else -> Color(0xFFE9EEF4)
+        }
+        9 -> when (kind) {
+            "sun", "bolt" -> Color(0xFFFFC531); "moon" -> Color(0xFFF4D77A); "drop" -> Color(0xFF4FA3FF)
+            "snow" -> Color(0xFFE8F1FF); "dark" -> Color(0xFF7D8FA3); else -> Color(0xFFDCE4EE)
+        }
+        10 -> when (kind) {
+            "sun" -> Color(0xFFFF8A3D); "bolt" -> Color(0xFFFFB020); "moon" -> Color(0xFFFFB067); "drop" -> Color(0xFF63B3ED)
+            "snow" -> Color(0xFFE2E8F0); "dark" -> Color(0xFF2D3748); else -> Color(0xFF4A5568)
+        }
+        11 -> when (kind) {
+            "sun", "bolt" -> Color(0xFFFFC531); "moon" -> Color(0xFFF4D77A); "drop" -> Color(0xFF4FA3FF)
+            "snow" -> Color(0xFFE8F1FF); "dark" -> Color(0xFF8A97A8); else -> Color(0xFFDCE3EC)
+        }
         else -> when (kind) {
             "sun", "bolt" -> Color(0xFFFFC64A)
             "moon" -> Color(0xFFF4D77A)
             "drop" -> Color(0xFF5DA8F2)
             "snow" -> Color(0xFFDDEEFF)
             "dark" -> Color(0xFF7F8E99)
-            else -> if (set == 2) Color(0xFFB9C4CC) else Color(0xFF9EABB5)
+            else -> Color(0xFF9EABB5)
         }
     }
 
-    fun brush(kind: String, top: Float, bottom: Float): Brush? = if (set != 4) null else when (kind) {
-        "sun" -> Brush.linearGradient(listOf(Color(0xFFFFE38A), Color(0xFFFF9A1F)), Offset(0f, top), Offset(0f, bottom))
-        "moon" -> Brush.linearGradient(listOf(Color(0xFFFFF4C2), Color(0xFFE0B84A)), Offset(0f, top), Offset(0f, bottom))
-        "dark" -> Brush.linearGradient(listOf(Color(0xFFC9D3DD), Color(0xFF5E7183)), Offset(0f, top), Offset(0f, bottom))
-        "cloud" -> Brush.linearGradient(listOf(Color.White, Color(0xFF93A8BC)), Offset(0f, top), Offset(0f, bottom))
+    /** Colore della parte bassa (Due toni), del bordo (Vivaci) o dell'ombra (Pastello). */
+    fun second(kind: String): Color = when (set) {
+        6 -> if (kind == "dark") Color(0xFF5F6B78) else Color(0xFFA9B6C3)
+        7 -> if (kind == "dark") Color(0xFF8E98A8) else Color(0xFFC9D3E3)
+        11 -> if (kind == "dark") Color(0xFF5E6B7C) else Color(0xFFAEBBCB)
+        else -> Color.Transparent
+    }
+
+    fun brush(kind: String, top: Float, bottom: Float): Brush? = when (set) {
+        4 -> when (kind) {
+            "sun" -> Brush.linearGradient(listOf(Color(0xFFFFE38A), Color(0xFFFF9A1F)), Offset(0f, top), Offset(0f, bottom))
+            "moon" -> Brush.linearGradient(listOf(Color(0xFFFFF4C2), Color(0xFFE0B84A)), Offset(0f, top), Offset(0f, bottom))
+            "dark" -> Brush.linearGradient(listOf(Color(0xFFC9D3DD), Color(0xFF5E7183)), Offset(0f, top), Offset(0f, bottom))
+            "cloud" -> Brush.linearGradient(listOf(Color.White, Color(0xFF93A8BC)), Offset(0f, top), Offset(0f, bottom))
+            else -> null
+        }
+        9 -> when (kind) {
+            "dark" -> Brush.linearGradient(listOf(Color(0xFFDDE4EC), Color(0xFF6E8196)), Offset(0f, top), Offset(0f, bottom))
+            "cloud" -> Brush.linearGradient(listOf(Color.White, Color(0xFFB9C7D6)), Offset(0f, top), Offset(0f, bottom))
+            else -> null
+        }
         else -> null
     }
 
     /** Disegna una forma piena secondo lo stile del set. */
     fun DrawScope.shape(path: Path, kind: String, top: Float, bottom: Float) {
-        when (set) {
-            2 -> drawPath(path, color(kind), style = stroke)
-            5 -> {
-                drawPath(path, accent.copy(alpha = 0.3f))
-                drawPath(path, accent, style = stroke)
+        val isCloud = kind == "cloud" || kind == "dark"
+        when {
+            set == 7 && isCloud -> {
+                // ombra leggera spostata in basso a destra
+                translate(2.5f * k, 3.5f * k) { drawPath(path, second(kind)) }
+                drawPath(path, color(kind))
+            }
+            set == 6 && isCloud -> {
+                drawPath(path, second(kind), style = Stroke(width = 3f * k, join = StrokeJoin.Round))
+                drawPath(path, color(kind))
+            }
+            set == 11 && isCloud -> {
+                drawPath(path, color(kind))
+                val cut = (top + (bottom - top) * 0.62f) * k
+                clipPath(path) { drawRect(second(kind), topLeft = Offset(0f, cut), size = androidx.compose.ui.geometry.Size(size.width, size.height - cut)) }
             }
             else -> {
                 val b = brush(kind, top * k, bottom * k)
@@ -80,10 +137,13 @@ private class Pal(
         }
     }
 
+    /** Spessore delle linee (raggi e gocce). */
+    val lineW get() = if (set == 8) 3.6f else 2.8f
+
     fun DrawScope.line(x1: Float, y1: Float, x2: Float, y2: Float, kind: String, alpha: Float = 1f) {
         if (alpha <= 0.01f) return
-        val col = if (set == 4 && kind == "drop") Color(0xFF4FA3FF) else color(kind)
-        drawLine(col.copy(alpha = col.alpha * alpha.coerceIn(0f, 1f)), Offset(x1 * k, y1 * k), Offset(x2 * k, y2 * k), strokeWidth = 2.8f * k, cap = StrokeCap.Round)
+        val col = color(kind)
+        drawLine(col.copy(alpha = col.alpha * alpha.coerceIn(0f, 1f)), Offset(x1 * k, y1 * k), Offset(x2 * k, y2 * k), strokeWidth = lineW * k, cap = StrokeCap.Round)
     }
 }
 
@@ -111,12 +171,15 @@ private fun moonPath(k: Float, cx: Float, cy: Float, r: Float): Path {
 
 /** Sole: [rot] gradi di rotazione dei raggi, [pulse] -1..1 allunga/accorcia i raggi. */
 private fun Pal.sun(scope: DrawScope, cx: Float, cy: Float, r: Float, rot: Float = 0f, pulse: Float = 0f) = with(scope) {
-    shape(circle(k, cx, cy, r), "sun", cy - r, cy + r)
-    val len = 7f + pulse * 1.3f
+    val round = set == 8
+    val rr = if (round) r * 0.85f else r
+    shape(circle(k, cx, cy, rr), "sun", cy - rr, cy + rr)
+    val start = if (round) rr + 4.5f else r + 3.5f
+    val len = (if (round) rr + 6.5f else r + 7f) + pulse * 1.3f
     for (i in 0 until 8) {
         val a = Math.toRadians(i * 45.0 + rot)
         val c = kotlin.math.cos(a).toFloat(); val s = kotlin.math.sin(a).toFloat()
-        line(cx + c * (r + 3.5f), cy + s * (r + 3.5f), cx + c * (r + len), cy + s * (r + len), "sun")
+        line(cx + c * start, cy + s * start, cx + c * len, cy + s * len, "sun")
     }
 }
 
@@ -191,8 +254,8 @@ fun DrawScope.drawWeather(sky: Sky, isDay: Boolean, set: Int, accent: Color, ink
                 val flakes = listOf(16f to 35f, 24f to 39f, 32f to 35f, 20f to 44f, 28f to 44f)
                 fun flake(x: Float, y: Float, a: Float) {
                     if (a <= 0.01f) return
-                    if (set == 2 || set == 5) drawCircle(color("snow").let { if (set == 5) accent else it }.copy(alpha = a), 2.2f * k, Offset(x * k, y * k), style = stroke)
-                    else drawCircle((if (set == 0 || set == 3) color("snow") else Color(0xFFDDEEFF)).copy(alpha = a), 2.4f * k, Offset(x * k, y * k))
+                    if (set == 6 || set == 10) drawCircle(Color(0xFF8C99A6).copy(alpha = a), 3.1f * k, Offset(x * k, y * k))
+                    drawCircle(color("snow").copy(alpha = a), 2.4f * k, Offset(x * k, y * k))
                 }
                 for ((x, y) in flakes) flake(x, y, still)
                 if (amp > 0.01f) flakes.forEachIndexed { i, (x, _) ->

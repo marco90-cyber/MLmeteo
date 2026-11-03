@@ -121,7 +121,7 @@ fun SettingsScreen() {
             SettingRow("Tema e colori", if (s.useWallpaper) "Colori dallo sfondo" else "Colore manuale", Icons.Filled.Palette,
                 onClick = { Nav.go(Screen.APPEARANCE) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
-            SettingRow("Set di icone", IconSetNames[s.iconSet.coerceIn(0, 5)].first, Icons.Filled.Brush, onClick = { Nav.go(Screen.APPEARANCE) }, trailing = { com.marco.mltheme.MLChevron() })
+            SettingRow("Set di icone", iconSetName(s.iconSet), Icons.Filled.Brush, onClick = { Nav.go(Screen.APPEARANCE) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
             SettingRow("Elementi della Home", "Scegli cosa vedere e in che ordine", Icons.Filled.Dashboard, onClick = { Nav.go(Screen.HOME_ITEMS) }, trailing = { com.marco.mltheme.MLChevron() })
         }
@@ -224,26 +224,27 @@ fun AppearanceScreen() {
         Hint("Nuvole che passano, pioggia, neve, lampi e stelle nella card principale. Le animazioni si fermano quando l'app non è aperta.")
 
         SectionTitle("Icone meteo")
-        val rows = IconSetNames.indices.chunked(2)
+        val rows = IconSets.chunked(2)
         rows.forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                pair.forEach { i ->
-                    val sel = s.iconSet == i
+                pair.forEach { (id, name, desc) ->
+                    val sel = s.iconSet == id
                     Column(
                         Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(c.card)
                             .border(2.dp, if (sel) c.accent else Color.Transparent, RoundedCornerShape(22.dp))
-                            .clickable { AppState.update { it.copy(iconSet = i) } }.padding(14.dp),
+                            .clickable { AppState.update { it.copy(iconSet = id) } }.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             listOf(0 to true, 2 to true, 63 to true, 95 to true).forEach { (code, day) ->
-                                WeatherIcon(code, day, 32.dp, set = i)
+                                WeatherIcon(code, day, 32.dp, set = id)
                             }
                         }
-                        Text(IconSetNames[i].first, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Text(IconSetNames[i].second, color = c.inkDim, fontSize = 12.sp)
+                        Text(name, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(desc, color = c.inkDim, fontSize = 12.sp)
                     }
                 }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
         Hint("Tutte le icone sono disegnate da MLMeteo, nessuna licenza esterna.")

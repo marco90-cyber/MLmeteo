@@ -112,7 +112,7 @@ object Prefs {
             manualColor = p.getLong("manualColor", d.manualColor),
             mode = p.getString("mode", d.mode) ?: d.mode,
             weatherTint = p.getBoolean("weatherTint", d.weatherTint),
-            iconSet = p.getInt("iconSet", d.iconSet),
+            iconSet = validIconSet(p.getInt("iconSet", d.iconSet)),
             homeOrder = (p.getString("homeOrder", null)?.split(',')?.filter { it.isNotBlank() }) ?: d.homeOrder,
             hidden = (p.getString("hidden", "") ?: "").split(',').filter { it.isNotBlank() }.toSet(),
             daysCount = p.getInt("daysCount", d.daysCount),
