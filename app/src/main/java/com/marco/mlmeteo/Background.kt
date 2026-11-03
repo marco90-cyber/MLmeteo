@@ -51,18 +51,36 @@ object Background {
         scheduleMorning(ctx, s)
     }
 
+    /** Le 4 previsioni del giorno: mattino, pomeriggio, sera, notte. */
+    val digests = listOf("morning", "afternoon", "evening", "night")
+
+    fun digestOn(s: Settings, slot: String) = when (slot) {
+        "afternoon" -> s.notifAfternoon; "evening" -> s.notifEvening; "night" -> s.notifNight; else -> s.notifMorning
+    }
+
+    fun digestMinutes(s: Settings, slot: String) = when (slot) {
+        "afternoon" -> s.afternoonMinutes; "evening" -> s.eveningMinutes; "night" -> s.nightMinutes; else -> s.morningMinutes
+    }
+
     fun scheduleMorning(ctx: Context, s: Settings = Prefs.loadSettings(ctx)) {
+        digests.forEach { scheduleDigest(ctx, it, s) }
+    }
+
+    fun scheduleDigest(ctx: Context, slot: String, s: Settings = Prefs.loadSettings(ctx)) {
         val wm = WorkManager.getInstance(ctx)
-        if (!s.notifMorning) { wm.cancelUniqueWork(MORNING); return }
+        val name = if (slot == "morning") MORNING else "mlmeteo-digest-$slot"
+        if (!digestOn(s, slot)) { wm.cancelUniqueWork(name); return }
+        val m = digestMinutes(s, slot)
         val now = LocalDateTime.now()
-        var next = now.toLocalDate().atTime(LocalTime.of(s.morningMinutes / 60, s.morningMinutes % 60))
+        var next = now.toLocalDate().atTime(LocalTime.of(m / 60, m % 60))
         if (!next.isAfter(now.plusMinutes(1))) next = next.plusDays(1)
         val delay = Duration.between(now, next).toMillis()
         val req = OneTimeWorkRequestBuilder<MorningWorker>()
             .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .setInputData(androidx.work.workDataOf("slot" to slot))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
-        wm.enqueueUniqueWork(MORNING, ExistingWorkPolicy.REPLACE, req)
+        wm.enqueueUniqueWork(name, ExistingWorkPolicy.REPLACE, req)
     }
 }
 
@@ -102,21 +120,22 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
     }
 }
 
-/** Previsione del mattino all'orario scelto (poi si riprogramma per il giorno dopo). */
+/** Previsione all'orario scelto (mattino, pomeriggio, sera o notte), poi si riprogramma per il giorno dopo. */
 class MorningWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         val s = Prefs.loadSettings(ctx)
+        val slot = inputData.getString("slot") ?: "morning"
         try {
             val places = (listOfNotNull(Prefs.loadGps(ctx).takeIf { s.useGps }) + Prefs.loadPlaces(ctx))
             val main = places.firstOrNull { it.id == s.mainPlaceId } ?: places.firstOrNull()
-            if (main != null && s.notifMorning) {
+            if (main != null && Background.digestOn(s, slot)) {
                 val f = try { WeatherRepo.forecast(main, Sources.byId(s.sourceId)).also { ForecastStore.save(ctx, main.id, it) } }
                     catch (e: Exception) { ForecastStore.load(ctx, main.id) }
-                if (f != null) Notify.morning(ctx, main, f, s)
+                if (f != null) Notify.digest(ctx, main, f, s, slot)
             }
         } finally {
-            Background.scheduleMorning(ctx, s)
+            Background.scheduleDigest(ctx, slot, s)
         }
         return Result.success()
     }
@@ -136,7 +155,7 @@ object Notify {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_ALERTS, "Allerte meteo", NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(NotificationChannel(CH_RAIN, "Pioggia in arrivo", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(CH_MORNING, "Previsione del mattino", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_MORNING, "Previsioni del giorno", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CH_STATUS, "Temperatura nella barra di stato", NotificationManager.IMPORTANCE_LOW).apply {
             setShowBadge(false)
         })
@@ -224,18 +243,94 @@ object Notify {
         sp.edit().putLong("rainAt", System.currentTimeMillis()).apply()
     }
 
-    fun morning(ctx: Context, p: Place, f: Forecast, s: Settings) {
+    /**
+     * Previsione del giorno, come:
+     * "9° - Pioggia | Massima: 13° - Minima: 6°"
+     * "Oggi - Pioggia. Massima 13°. Vento da nord-nordovest a 16 km/h, con raffiche fino a 44 km/h verso le 11:00.
+     *  Probabilità di precipitazioni 100%, 2,6mm."
+     */
+    fun digest(ctx: Context, p: Place, f: Forecast, s: Settings, slot: String) {
         val fmt = Fmt(s)
-        val today = f.days.firstOrNull() ?: return
-        val rain = fmt.rainShort(today.precipProb, today.precipSum)
+        val now = f.localNow
+        val today = now.toLocalDate()
+        val tomorrow = today.plusDays(1)
+        val d0 = f.days.firstOrNull { it.date == today } ?: f.days.firstOrNull() ?: return
+        val d1 = f.days.firstOrNull { it.date == tomorrow }
+        // finestra di ore descritta
+        val (label, from, to, day) = when (slot) {
+            "afternoon" -> Quad("Pomeriggio", today.atTime(13, 0), today.atTime(19, 0), d0)
+            "evening" -> Quad("Stasera", today.atTime(18, 0), tomorrow.atTime(0, 0), d0)
+            "night" -> Quad("Domani", tomorrow.atTime(6, 0), tomorrow.atTime(23, 0), d1 ?: d0)
+            else -> Quad("Oggi", today.atTime(6, 0), tomorrow.atTime(0, 0), d0)
+        }
+        val hrs = f.hours.filter { !it.time.isBefore(from.coerceAtLeast(now.withMinute(0))) && it.time.isBefore(to) }
+            .ifEmpty { f.hours.filter { !it.time.isBefore(from) && it.time.isBefore(to) } }
+        val code = if (slot == "morning" || slot == "night" || hrs.isEmpty()) day.code else mainCode(hrs.map { it.code })
+        val cond = conditionText(code)
+        val title = when (slot) {
+            "night" -> "${fmt.temp(f.current.temp)} - ${conditionText(f.current.code, f.current.isDay)} | Domani: Massima ${fmt.temp(day.tMax)} - Minima ${fmt.temp(day.tMin)}"
+            else -> "${fmt.temp(f.current.temp)} - ${conditionText(f.current.code, f.current.isDay)} | Massima: ${fmt.temp(d0.tMax)} - Minima: ${fmt.temp(d0.tMin)}"
+        }
+        val sb = StringBuilder("$label - $cond.")
+        when (slot) {
+            "morning", "night" -> {
+                sb.append(" Massima ${fmt.temp(day.tMax)}")
+                if (slot == "night") sb.append(", minima ${fmt.temp(day.tMin)}")
+                sb.append(".")
+            }
+            "afternoon" -> hrs.maxOfOrNull { it.temp }?.let { sb.append(" Massima ${fmt.temp(it)}.") }
+            else -> hrs.minOfOrNull { it.temp }?.let { sb.append(" Minima ${fmt.temp(it)}.") }
+        }
+        // vento: media e direzione prevalente, raffica più forte e quando
+        val wind = hrs.filter { it.wind.ok() }
+        if (wind.isNotEmpty()) {
+            val avg = wind.map { it.wind }.average()
+            val dirs = wind.filter { it.windDir.ok() }
+            val dir = if (dirs.isEmpty()) Double.NaN else {
+                val x = dirs.sumOf { kotlin.math.sin(Math.toRadians(it.windDir)) * it.wind }
+                val y = dirs.sumOf { kotlin.math.cos(Math.toRadians(it.windDir)) * it.wind }
+                (Math.toDegrees(kotlin.math.atan2(x, y)) + 360) % 360
+            }
+            sb.append(" Vento")
+            if (dir.ok()) sb.append(" da ${windDirLong(dir)}")
+            sb.append(" a ${fmt.wind(avg)}")
+            val g = hrs.filter { it.gust.ok() }.maxByOrNull { it.gust }
+            if (g != null && g.gust >= avg + 10) sb.append(", con raffiche fino a ${fmt.wind(g.gust)} verso le ${fmt.time(g.time)}")
+            sb.append(".")
+        }
+        // pioggia: probabilità massima e millimetri totali
+        val prob = if (slot == "morning" || slot == "night") day.precipProb else hrs.mapNotNull { h -> h.precipProb.takeIf { it.ok() } }.maxOrNull() ?: Double.NaN
+        val mm = if (slot == "morning" || slot == "night") day.precipSum else hrs.sumOf { if (it.precip.ok()) it.precip else 0.0 }
+        if (prob.ok() || (mm.ok() && mm >= 0.1)) {
+            sb.append(" Probabilità di precipitazioni ${if (prob.ok()) "${prob.roundToInt()}%" else "—"}")
+            if (mm.ok() && mm >= 0.1) sb.append(", ${fmt.rain(mm).replace(" mm", "mm")}")
+            sb.append(".")
+        }
+        val body = sb.toString()
         val n = NotificationCompat.Builder(ctx, CH_MORNING)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle("Buongiorno! Oggi a ${p.name}: ${conditionText(today.code)}")
-            .setContentText("Max ${fmt.temp(today.tMax)} · Min ${fmt.temp(today.tMin)}" + if (rain.isNotBlank()) " · Pioggia $rain" else "")
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setSubText(p.name)
             .setContentIntent(openApp(ctx))
             .setAutoCancel(true)
             .build()
-        post(ctx, ID_MORNING, n)
+        val id = when (slot) { "afternoon" -> 4; "evening" -> 5; "night" -> 6; else -> ID_MORNING }
+        post(ctx, id, n)
+    }
+
+    private data class Quad(val label: String, val from: LocalDateTime, val to: LocalDateTime, val day: Day)
+
+    /** Cielo prevalente: il più "importante" che compare in almeno un quarto delle ore, altrimenti il più frequente. */
+    private fun mainCode(codes: List<Int>): Int {
+        val bySky = codes.groupBy { skyOf(it) }
+        val order = listOf(Sky.STORM, Sky.SNOW, Sky.RAIN, Sky.DRIZZLE, Sky.FOG)
+        for (sky in order) {
+            val l = bySky[sky] ?: continue
+            if (l.size * 4 >= codes.size) return l.groupingBy { it }.eachCount().maxByOrNull { it.value }!!.key
+        }
+        return codes.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 3
     }
 
     /** Notifica fissa con la temperatura come icona nella barra di stato. */

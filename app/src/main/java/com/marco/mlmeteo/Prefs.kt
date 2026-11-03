@@ -63,6 +63,12 @@ data class Settings(
     val notifMorning: Boolean = true,
     /** Orario della previsione del mattino, in minuti dalla mezzanotte (8:00). */
     val morningMinutes: Int = 8 * 60,
+    val notifAfternoon: Boolean = true,
+    val afternoonMinutes: Int = 13 * 60,
+    val notifEvening: Boolean = true,
+    val eveningMinutes: Int = 18 * 60,
+    val notifNight: Boolean = true,
+    val nightMinutes: Int = 22 * 60,
     val notifStatus: Boolean = false,
     val quietNight: Boolean = true,
     val updateFreq: Int = 60,
@@ -125,6 +131,12 @@ object Prefs {
             notifRain = p.getBoolean("notifRain", d.notifRain),
             notifMorning = p.getBoolean("notifMorning", d.notifMorning),
             morningMinutes = p.getInt("morningMinutes", d.morningMinutes),
+            notifAfternoon = p.getBoolean("notifAfternoon", d.notifAfternoon),
+            afternoonMinutes = p.getInt("afternoonMinutes", d.afternoonMinutes),
+            notifEvening = p.getBoolean("notifEvening", d.notifEvening),
+            eveningMinutes = p.getInt("eveningMinutes", d.eveningMinutes),
+            notifNight = p.getBoolean("notifNight", d.notifNight),
+            nightMinutes = p.getInt("nightMinutes", d.nightMinutes),
             notifStatus = p.getBoolean("notifStatus", d.notifStatus),
             quietNight = p.getBoolean("quietNight", d.quietNight),
             updateFreq = p.getInt("updateFreq", d.updateFreq),
@@ -165,6 +177,9 @@ object Prefs {
             .putBoolean("notifRain", s.notifRain)
             .putBoolean("notifMorning", s.notifMorning)
             .putInt("morningMinutes", s.morningMinutes)
+            .putBoolean("notifAfternoon", s.notifAfternoon).putInt("afternoonMinutes", s.afternoonMinutes)
+            .putBoolean("notifEvening", s.notifEvening).putInt("eveningMinutes", s.eveningMinutes)
+            .putBoolean("notifNight", s.notifNight).putInt("nightMinutes", s.nightMinutes)
             .putBoolean("notifStatus", s.notifStatus)
             .putBoolean("quietNight", s.quietNight)
             .putInt("updateFreq", s.updateFreq)
@@ -227,7 +242,8 @@ object ForecastStore {
         val hours = JSONArray()
         f.hours.forEach { h ->
             hours.put(JSONObject().put("t", h.time.toString()).put("temp", d(h.temp)).put("code", h.code).put("day", h.isDay)
-                .put("pp", d(h.precipProb)).put("pr", d(h.precip)))
+                .put("pp", d(h.precipProb)).put("pr", d(h.precip))
+                .put("ws", d(h.wind)).put("wd", d(h.windDir)).put("wg", d(h.gust)))
         }
         val days = JSONArray()
         f.days.forEach { x ->
@@ -246,7 +262,8 @@ object ForecastStore {
         val ha = o.getJSONArray("hours")
         val hours = (0 until ha.length()).map { i ->
             val h = ha.getJSONObject(i)
-            Hour(java.time.LocalDateTime.parse(h.getString("t")), h.dd("temp"), h.optInt("code", 3), h.optBoolean("day", true), h.dd("pp"), h.dd("pr"))
+            Hour(java.time.LocalDateTime.parse(h.getString("t")), h.dd("temp"), h.optInt("code", 3), h.optBoolean("day", true), h.dd("pp"), h.dd("pr"),
+                if (h.has("ws")) h.dd("ws") else Double.NaN, if (h.has("wd")) h.dd("wd") else Double.NaN, if (h.has("wg")) h.dd("wg") else Double.NaN)
         }
         val da = o.getJSONArray("days")
         val days = (0 until da.length()).map { i ->

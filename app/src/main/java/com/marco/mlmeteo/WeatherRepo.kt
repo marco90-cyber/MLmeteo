@@ -66,7 +66,8 @@ object WeatherRepo {
 
     private const val CURRENT = "temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,is_day," +
         "wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,visibility,uv_index,precipitation"
-    private const val HOURLY = "temperature_2m,weather_code,is_day,precipitation_probability,precipitation,visibility,uv_index"
+    private const val HOURLY = "temperature_2m,weather_code,is_day,precipitation_probability,precipitation,visibility,uv_index," +
+        "wind_speed_10m,wind_direction_10m,wind_gusts_10m"
     private const val DAILY = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max," +
         "precipitation_sum,sunrise,sunset,uv_index_max"
 
@@ -127,6 +128,9 @@ object WeatherRepo {
                 isDay = (h.optJSONArray("is_day")?.d(i) ?: 1.0) == 1.0,
                 precipProb = h.optJSONArray("precipitation_probability")?.d(i) ?: Double.NaN,
                 precip = h.optJSONArray("precipitation")?.d(i) ?: Double.NaN,
+                wind = h.optJSONArray("wind_speed_10m")?.d(i) ?: Double.NaN,
+                windDir = h.optJSONArray("wind_direction_10m")?.d(i) ?: Double.NaN,
+                gust = h.optJSONArray("wind_gusts_10m")?.d(i) ?: Double.NaN,
             )
             if (hours.size >= 48) break
         }
@@ -207,7 +211,8 @@ object WeatherRepo {
                         val sr = d.sunrise; val ss = d.sunset
                         sr == null || ss == null || (!t.isBefore(sr) && t.isBefore(ss))
                     } ?: true
-                    hours += Hour(t, temp, code, isDay, Double.NaN, rain)
+                    hours += Hour(t, temp, code, isDay, Double.NaN, rain,
+                        wind = det.d("wind_speed") * 3.6, windDir = det.d("wind_from_direction"), gust = det.d("wind_speed_of_gust") * 3.6)
                 }
             }
             byDay.getOrPut(t.toLocalDate()) { mutableListOf() } += temp to code
@@ -316,7 +321,9 @@ object WeatherRepo {
                 temp = wavg(same.map { it.first.temp to it.second }),
                 code = wmode(same.map { it.first.code to it.second }),
                 precipProb = wavg(same.map { it.first.precipProb to it.second }),
-                precip = wmedian(same.map { it.first.precip to it.second }),
+                precip = wavg(same.map { it.first.precip to it.second }),
+                wind = wavg(same.map { it.first.wind to it.second }),
+                gust = wavg(same.map { it.first.gust to it.second }),
             )
         }
         val days = base.days.map { d ->

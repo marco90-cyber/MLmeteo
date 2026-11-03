@@ -80,7 +80,10 @@ object AppState {
             refreshAll()
         }
         if (old.updateFreq != settings.updateFreq || old.wifiOnly != settings.wifiOnly ||
-            old.notifMorning != settings.notifMorning || old.morningMinutes != settings.morningMinutes
+            old.notifMorning != settings.notifMorning || old.morningMinutes != settings.morningMinutes ||
+            old.notifAfternoon != settings.notifAfternoon || old.afternoonMinutes != settings.afternoonMinutes ||
+            old.notifEvening != settings.notifEvening || old.eveningMinutes != settings.eveningMinutes ||
+            old.notifNight != settings.notifNight || old.nightMinutes != settings.nightMinutes
         ) Background.schedule(app)
         if (old.notifStatus != settings.notifStatus || old.mainPlaceId != settings.mainPlaceId) {
             mainPlace()?.let { p -> forecasts[p.id]?.let { Notify.statusBar(app, p, it) } } ?: Notify.cancelStatus(app)

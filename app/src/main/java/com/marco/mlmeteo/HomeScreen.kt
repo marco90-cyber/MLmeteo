@@ -388,7 +388,9 @@ private fun ForecastPill(label: String, code: Int, isDay: Boolean, temp: String,
         Text(temp, color = if (first) c.onAccentContainer else c.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(if (prob.ok() && prob >= 1) "${prob.roundToInt()}%" else " ", color = if (first) c.onAccentContainer else c.accent,
             fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-        Text(if (mm.ok() && mm >= 0.1) fmt.rain(mm) else " ", color = RainBlue, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        // i mm si vedono sempre quando c'è una probabilità di pioggia (anche 0 mm)
+        val showMm = (mm.ok() && mm >= 0.05) || (prob.ok() && prob >= 1)
+        Text(if (showMm) fmt.rain(if (mm.ok()) mm else 0.0) else " ", color = RainBlue, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 

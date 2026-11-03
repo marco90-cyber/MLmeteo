@@ -33,6 +33,9 @@ data class Hour(
     val isDay: Boolean,
     val precipProb: Double,
     val precip: Double,
+    val wind: Double = Double.NaN,
+    val windDir: Double = Double.NaN,
+    val gust: Double = Double.NaN,
 )
 
 data class Day(
@@ -170,6 +173,14 @@ fun windDirText(deg: Double): String {
     if (!deg.ok()) return ""
     val names = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
     return names[(((deg % 360) + 360 + 22.5) / 45).toInt() % 8]
+}
+
+/** Direzione del vento per esteso ("nord-nordovest"). [deg] = da dove soffia. */
+fun windDirLong(deg: Double): String {
+    if (!deg.ok()) return ""
+    val names = listOf("nord", "nord-nordest", "nord-est", "est-nordest", "est", "est-sudest", "sud-est", "sud-sudest",
+        "sud", "sud-sudovest", "sud-ovest", "ovest-sudovest", "ovest", "ovest-nordovest", "nord-ovest", "nord-nordovest")
+    return names[(((deg % 360) + 360 + 11.25) / 22.5).toInt() % 16]
 }
 
 fun aqiText(aqi: Double): String = when {

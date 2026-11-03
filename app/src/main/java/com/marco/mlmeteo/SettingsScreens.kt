@@ -133,7 +133,7 @@ fun SettingsScreen() {
 
         SectionTitle("Notifiche e widget")
         Group {
-            SettingRow("Notifiche", "Allerte, pioggia in arrivo, previsione del mattino", Icons.Filled.Notifications,
+            SettingRow("Notifiche", "Allerte, pioggia in arrivo, previsioni del giorno", Icons.Filled.Notifications,
                 onClick = { Nav.go(Screen.NOTIFICATIONS) }, trailing = { com.marco.mltheme.MLChevron() })
             Divider()
             SettingRow("Widget", "I tuoi widget: modifica località, contenuto e aspetto", Icons.Filled.Widgets, onClick = { Nav.go(Screen.WIDGETS) }, trailing = { com.marco.mltheme.MLChevron() })
@@ -422,7 +422,7 @@ fun NotificationsScreen() {
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted = it }
     fun need() { if (!granted && Build.VERSION.SDK_INT >= 33) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
-    var picking by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf<String?>(null) }
     val main = AppState.mainPlace()
     Page("Notifiche") {
         if (!granted) {
@@ -450,15 +450,31 @@ fun NotificationsScreen() {
                 AppState.update { it.copy(notifRain = v) }; if (v) need()
             }
             Divider()
-            SwitchRow("Previsione del mattino", null, Icons.Filled.AccessTime, checked = s.notifMorning) { v ->
-                AppState.update { it.copy(notifMorning = v) }; if (v) need()
-            }
-            if (s.notifMorning) {
-                Divider()
-                SettingRow(
-                    "Orario", String.format(java.util.Locale.ITALY, "Alle %02d:%02d", s.morningMinutes / 60, s.morningMinutes % 60),
-                    null, onClick = { picking = true },
-                )
+            val slots = listOf(
+                "morning" to "Previsione del mattino",
+                "afternoon" to "Previsione del pomeriggio",
+                "evening" to "Previsione della sera",
+                "night" to "Previsione per domani (notte)",
+            )
+            slots.forEachIndexed { i, (slot, title) ->
+                if (i > 0) Divider()
+                val on = Background.digestOn(s, slot)
+                val m = Background.digestMinutes(s, slot)
+                SwitchRow(title, String.format(java.util.Locale.ITALY, "Alle %02d:%02d", m / 60, m % 60), Icons.Filled.AccessTime, checked = on) { v ->
+                    AppState.update {
+                        when (slot) {
+                            "afternoon" -> it.copy(notifAfternoon = v)
+                            "evening" -> it.copy(notifEvening = v)
+                            "night" -> it.copy(notifNight = v)
+                            else -> it.copy(notifMorning = v)
+                        }
+                    }
+                    if (v) need()
+                }
+                if (on) {
+                    Divider()
+                    SettingRow("Orario", String.format(java.util.Locale.ITALY, "Alle %02d:%02d", m / 60, m % 60), null, onClick = { picking = slot })
+                }
             }
             Divider()
             SwitchRow("Temperatura nella barra di stato", "Notifica fissa con la temperatura come icona", Icons.Filled.Thermostat, checked = s.notifStatus) { v ->
@@ -469,21 +485,30 @@ fun NotificationsScreen() {
                 AppState.update { it.copy(quietNight = v) }
             }
         }
-        Hint("Le notifiche usano l'aggiornamento in background (Impostazioni → Notifiche e widget). La previsione del mattino può arrivare con qualche minuto di ritardo se il telefono è in risparmio energetico.")
+        Hint("Le notifiche usano l'aggiornamento in background (Impostazioni → Notifiche e widget). Le previsioni del giorno possono arrivare con qualche minuto di ritardo se il telefono è in risparmio energetico.")
     }
-    if (picking) {
-        val st = androidx.compose.material3.rememberTimePickerState(s.morningMinutes / 60, s.morningMinutes % 60, is24Hour = true)
+    picking?.let { slot ->
+        val m0 = Background.digestMinutes(s, slot)
+        val st = androidx.compose.material3.rememberTimePickerState(m0 / 60, m0 % 60, is24Hour = true)
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { picking = false },
+            onDismissRequest = { picking = null },
             title = { Text("Orario della previsione") },
             text = { androidx.compose.material3.TimePicker(state = st) },
             confirmButton = {
                 TextButton(onClick = {
-                    AppState.update { it.copy(morningMinutes = st.hour * 60 + st.minute) }
-                    picking = false
+                    val m = st.hour * 60 + st.minute
+                    AppState.update {
+                        when (slot) {
+                            "afternoon" -> it.copy(afternoonMinutes = m)
+                            "evening" -> it.copy(eveningMinutes = m)
+                            "night" -> it.copy(nightMinutes = m)
+                            else -> it.copy(morningMinutes = m)
+                        }
+                    }
+                    picking = null
                 }) { Text("OK") }
             },
-            dismissButton = { TextButton(onClick = { picking = false }) { Text("Annulla") } },
+            dismissButton = { TextButton(onClick = { picking = null }) { Text("Annulla") } },
         )
     }
 }

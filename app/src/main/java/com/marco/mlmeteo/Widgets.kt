@@ -525,7 +525,7 @@ object Widgets {
                 cv.drawText(item.temp, cx, y + dp(if (small) 53f else 68f), p.text(13f, ink, true, Paint.Align.CENTER))
                 if (!small) {
                     if (item.prob.ok() && item.prob >= 1) cv.drawText("${item.prob.roundToInt()}%", cx, y + dp(82f), p.text(10f, if (hl) ink else c.accent, true, Paint.Align.CENTER))
-                    if (item.mm.ok() && item.mm >= 0.1) cv.drawText(p.fit(p.text(10f, rainBlue, true), fmt.rain(item.mm), colW - dp(4f)), cx, y + dp(94f), p.text(10f, rainBlue, true, Paint.Align.CENTER))
+                    if ((item.mm.ok() && item.mm >= 0.05) || (item.prob.ok() && item.prob >= 1)) cv.drawText(p.fit(p.text(10f, rainBlue, true), fmt.rain(if (item.mm.ok()) item.mm else 0.0), colW - dp(4f)), cx, y + dp(94f), p.text(10f, rainBlue, true, Paint.Align.CENTER))
                 }
             }
         }

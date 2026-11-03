@@ -78,7 +78,7 @@ fun Root() {
         }
         val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
         LaunchedEffect(Unit) {
-            val anyNotif = s.notifAlerts || s.notifRain || s.notifMorning || s.notifStatus
+            val anyNotif = s.notifAlerts || s.notifRain || s.notifMorning || s.notifAfternoon || s.notifEvening || s.notifNight || s.notifStatus
             val sp = AppState.app.getSharedPreferences("mlmeteo_notif", android.content.Context.MODE_PRIVATE)
             if (anyNotif && android.os.Build.VERSION.SDK_INT >= 33 && !Notify.canPost(AppState.app) && !sp.getBoolean("asked", false)) {
                 sp.edit().putBoolean("asked", true).apply()
