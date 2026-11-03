@@ -354,9 +354,48 @@ private fun CardTitle(text: String) {
     Text(text, color = LocalAppColors.current.accent, fontSize = 16.sp, fontWeight = FontWeight.Medium)
 }
 
+/** Orologio per le icone animate delle ore e dei giorni (secondi). 0 se le animazioni sono spente. */
+@Composable
+private fun iconClock(): Float {
+    if (AppState.settings.animations == "off") return 0f
+    val tr = androidx.compose.animation.core.rememberInfiniteTransition(label = "icone")
+    val t by tr.animateFloat(
+        0f, 3600f,
+        androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(3_600_000, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "t",
+    )
+    return t
+}
+
+/** Azzurro dei millimetri di pioggia. */
+private val RainBlue = Color(0xFF6CB8FF)
+
+/** Pillola verticale usata da "Prossime ore" e "Prossimi giorni". */
+@Composable
+private fun ForecastPill(label: String, code: Int, isDay: Boolean, temp: String, prob: Double, mm: Double, first: Boolean, t: Float, fmt: Fmt) {
+    val c = LocalAppColors.current
+    val on = AppState.settings.animations != "off"
+    Column(
+        Modifier.width(62.dp).clip(RoundedCornerShape(31.dp))
+            .background(if (first) c.accentContainer else c.card2).padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(label, color = if (first) c.onAccentContainer else c.inkDim, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        WeatherIcon(code, isDay, 32.dp, phase = if (on) t / fxPeriod(skyOf(code)) else 0f, amp = if (on) 1f else 0f)
+        Text(temp, color = if (first) c.onAccentContainer else c.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(if (prob.ok() && prob >= 1) "${prob.roundToInt()}%" else " ", color = if (first) c.onAccentContainer else c.accent,
+            fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(if (mm.ok() && mm >= 0.1) fmt.rain(mm) else " ", color = RainBlue, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
 @Composable
 private fun HoursCard(f: Forecast, fmt: Fmt) {
     val c = LocalAppColors.current
+    val t = iconClock()
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card).padding(vertical = 16.dp)) {
         Box(Modifier.padding(start = 18.dp, bottom = 10.dp)) { CardTitle("Prossime ore") }
         LazyRow(
@@ -365,20 +404,8 @@ private fun HoursCard(f: Forecast, fmt: Fmt) {
         ) {
             itemsIndexed(f.hours.take(24)) { i, h ->
                 val first = i == 0
-                Column(
-                    Modifier.width(62.dp).clip(RoundedCornerShape(31.dp))
-                        .background(if (first) c.accentContainer else c.card2).padding(vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(if (first) "Ora" else fmt.hourLabel(h.time), color = if (first) c.onAccentContainer else c.inkDim,
-                        fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                    WeatherIcon(h.code, h.isDay, 32.dp)
-                    Text(fmt.temp(if (first) f.current.temp else h.temp), color = if (first) c.onAccentContainer else c.ink,
-                        fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text(fmt.rainShort(h.precipProb, h.precip).ifEmpty { " " }, color = if (first) c.onAccentContainer else c.accent,
-                        fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                }
+                ForecastPill(if (first) "Ora" else fmt.hourLabel(h.time), h.code, h.isDay,
+                    fmt.temp(if (first) f.current.temp else h.temp), h.precipProb, h.precip, first, t, fmt)
             }
         }
     }
@@ -433,32 +460,18 @@ private fun DaysCard(f: Forecast, fmt: Fmt, count: Int) {
     val c = LocalAppColors.current
     val days = f.days.take(count)
     if (days.isEmpty()) return
-    val lo = days.minOf { it.tMin }
-    val hi = days.maxOf { it.tMax }
-    val span = (hi - lo).coerceAtLeast(1.0)
     val today = f.localNow.toLocalDate()
-    CardBox {
-        CardTitle("Prossimi ${days.size} giorni")
-        Spacer(Modifier.height(6.dp))
-        days.forEachIndexed { i, d ->
-            if (i > 0) androidx.compose.material3.HorizontalDivider(color = c.outline.copy(alpha = 0.5f))
-            Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(dayName(d.date, today), color = c.ink, fontSize = 15.sp, modifier = Modifier.width(76.dp), maxLines = 1)
-                WeatherIcon(d.code, true, 30.dp)
-                Text(fmt.rainShort(d.precipProb, d.precipSum), color = c.accent, fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium, modifier = Modifier.width(52.dp).padding(start = 4.dp), maxLines = 1)
-                Text(fmt.temp(d.tMin), color = c.inkDim, fontSize = 15.sp, modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
-                Gap(8)
-                Canvas(Modifier.weight(1f).height(6.dp)) {
-                    val r = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
-                    drawRoundRect(c.outline, cornerRadius = r)
-                    val x0 = ((d.tMin - lo) / span * size.width).toFloat()
-                    val x1 = ((d.tMax - lo) / span * size.width).toFloat()
-                    drawRoundRect(c.accent, topLeft = Offset(x0, 0f), size = Size((x1 - x0).coerceAtLeast(size.height), size.height), cornerRadius = r)
-                }
-                Gap(8)
-                Text(fmt.temp(d.tMax), color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
+    val t = iconClock()
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card).padding(vertical = 16.dp)) {
+        Box(Modifier.padding(start = 18.dp, bottom = 10.dp)) { CardTitle("Prossimi ${days.size} giorni") }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+        ) {
+            itemsIndexed(days) { i, d ->
+                val label = if (d.date == today) "Oggi"
+                    else d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ITALY).replaceFirstChar { it.uppercase() }.trimEnd('.')
+                ForecastPill(label, d.code, true, fmt.temp(d.tMax), d.precipProb, d.precipSum, i == 0 && d.date == today, t, fmt)
             }
         }
     }

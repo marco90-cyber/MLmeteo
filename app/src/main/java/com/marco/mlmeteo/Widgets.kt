@@ -414,9 +414,11 @@ object Widgets {
         var free = hDp - (pad / p.scale) - headerDp - (if (cfg.showCurrent) icDp + 10f else 0f) - 6f
         val hrs24 = f.hours.take(24)
         val anyRain = hrs24.any { (it.precip.ok() && it.precip >= 0.1) || (it.precipProb.ok() && it.precipProb >= 20) }
+        // pillole: complete (con % e mm) 100 dp, compatte 62 dp
+        fun pillDp(): Float = if (free >= 110f) 100f else if (free >= 72f) 62f else 0f
         var hoursDp = 0f
         if (cfg.showHours) {
-            if (free >= 88f) hoursDp = 78f else if (free >= 68f) hoursDp = 60f
+            hoursDp = pillDp()
             if (hoursDp > 0) free -= hoursDp + 10f
         }
         var extrasRow = false
@@ -426,10 +428,13 @@ object Widgets {
             val want = if (anyRain) 76f else 30f
             if (free >= want + 10f) { rainDp = want; free -= want + 10f }
         }
-        var dayRows = 0
-        if (cfg.showDays && free >= 30f) { dayRows = (free / 30f).toInt().coerceAtMost(f.days.size.coerceAtMost(16)); free -= dayRows * 30f }
+        var daysDp = 0f
+        if (cfg.showDays && f.days.isNotEmpty()) {
+            daysDp = pillDp()
+            if (daysDp > 0) free -= daysDp + 10f
+        }
         // lo spazio che avanza viene diviso tra le parti
-        val parts = listOf(cfg.showCurrent, hoursDp > 0, extrasRow, rainDp > 0, dayRows > 0).count { it }
+        val parts = listOf(cfg.showCurrent, hoursDp > 0, extrasRow, rainDp > 0, daysDp > 0).count { it }
         val gap = dp((free / (parts + 1)).coerceIn(0f, 16f))
 
         // --- intestazione
@@ -499,22 +504,38 @@ object Widgets {
         if (extrasRow) extrasLine()
         closeZone("main", y - gap / 2)
 
+        // --- pillole (ore e giorni): etichetta, icona, temperatura, % e mm di pioggia
+        val rainBlue = Color(0xFF6CB8FF)
+        class PillItem(val label: String, val code: Int, val isDay: Boolean, val temp: String, val prob: Double, val mm: Double)
+        fun pills(items: List<PillItem>, heightDp: Float, highlightFirst: Boolean) {
+            val hh = dp(heightDp)
+            val small = heightDp < 70f
+            val n = ((w - pad * 2) / dp(if (small) 46f else 52f)).toInt().coerceIn(3, 12).coerceAtMost(items.size)
+            if (n <= 0) return
+            val colW = (w - pad * 2) / n
+            items.take(n).forEachIndexed { i, item ->
+                val cx = pad + colW * i + colW / 2
+                val hl = highlightFirst && i == 0
+                if (hl) p.pill(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hh, c.accentContainer)
+                else if (!small) p.pill(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hh, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
+                val ink = if (hl) c.onAccentContainer else c.ink
+                cv.drawText(item.label, cx, y + dp(if (small) 14f else 18f), p.text(11f, if (hl) ink else c.inkDim, align = Paint.Align.CENTER))
+                val hi = dp(if (small) 20f else 26f).toInt()
+                cv.drawBitmap(icon(item.code, item.isDay, hi, s.iconSet, c), cx - hi / 2f, y + dp(if (small) 19f else 24f), null)
+                cv.drawText(item.temp, cx, y + dp(if (small) 53f else 68f), p.text(13f, ink, true, Paint.Align.CENTER))
+                if (!small) {
+                    if (item.prob.ok() && item.prob >= 1) cv.drawText("${item.prob.roundToInt()}%", cx, y + dp(82f), p.text(10f, if (hl) ink else c.accent, true, Paint.Align.CENTER))
+                    if (item.mm.ok() && item.mm >= 0.1) cv.drawText(p.fit(p.text(10f, rainBlue, true), fmt.rain(item.mm), colW - dp(4f)), cx, y + dp(94f), p.text(10f, rainBlue, true, Paint.Align.CENTER))
+                }
+            }
+        }
+
         // --- prossime ore
         if (hoursDp > 0) {
-            val hoursH = dp(hoursDp)
-            val small = hoursDp < 70f
-            val n = ((w - pad * 2) / dp(if (small) 46f else 52f)).toInt().coerceIn(3, 12)
-            val colW = (w - pad * 2) / n
-            f.hours.take(n).forEachIndexed { i, hr ->
-                val cx = pad + colW * i + colW / 2
-                if (i == 0) p.pill(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hoursH, c.accentContainer)
-                val ink = if (i == 0) c.onAccentContainer else c.ink
-                cv.drawText(if (i == 0) "Ora" else fmt.hourLabel(hr.time), cx, y + dp(if (small) 14f else 16f), p.text(11f, if (i == 0) ink else c.inkDim, align = Paint.Align.CENTER))
-                val hi = dp(if (small) 20f else 26f).toInt()
-                cv.drawBitmap(icon(hr.code, hr.isDay, hi, s.iconSet, c), cx - hi / 2f, y + dp(if (small) 19f else 22f), null)
-                cv.drawText(fmt.temp(if (i == 0) cur.temp else hr.temp), cx, y + dp(if (small) 53f else 66f), p.text(13f, ink, true, Paint.Align.CENTER))
-            }
-            y += hoursH + dp(10f) + gap
+            pills(f.hours.take(12).mapIndexed { i, hr ->
+                PillItem(if (i == 0) "Ora" else fmt.hourLabel(hr.time), hr.code, hr.isDay, fmt.temp(if (i == 0) cur.temp else hr.temp), hr.precipProb, hr.precip)
+            }, hoursDp, true)
+            y += dp(hoursDp) + dp(10f) + gap
             closeZone("hours", y - gap / 2)
         }
 
@@ -556,43 +577,15 @@ object Widgets {
             closeZone("rain", y - gap / 2)
         }
 
-        // --- prossimi giorni (quanti ne entrano)
-        val rowH = dp(30f)
-        if (dayRows > 0) {
-            val list = f.days.take(dayRows)
-            val lo = list.minOfOrNull { it.tMin } ?: 0.0
-            val hi = list.maxOfOrNull { it.tMax } ?: 1.0
-            val span = (hi - lo).coerceAtLeast(1.0)
+        // --- prossimi giorni (pillole come le ore)
+        if (daysDp > 0) {
             val todayDate = f.localNow.toLocalDate()
-            val showBar = wDp >= 250
-            for (d in list) {
-                val name = when (d.date) {
-                    todayDate -> "Oggi"
-                    todayDate.plusDays(1) -> "Domani"
-                    else -> d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ITALY).replaceFirstChar { it.uppercase() } + " ${d.date.dayOfMonth}"
-                }
-                cv.drawText(name, pad, y + dp(20f), p.text(13f, c.ink))
-                val di = dp(22f).toInt()
-                cv.drawBitmap(icon(d.code, true, di, s.iconSet, c), pad + dp(68f), y + dp(4f), null)
-                cv.drawText(fmt.rainShort(d.precipProb, d.precipSum), pad + dp(96f), y + dp(20f), p.text(11f, c.accent, true))
-                if (showBar) {
-                    val bx0 = pad + dp(152f); val bx1 = w - pad - dp(36f)
-                    cv.drawText(fmt.temp(d.tMin), bx0 - dp(6f), y + dp(20f), p.text(12f, c.inkDim, align = Paint.Align.RIGHT))
-                    val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.outline.toArgb() }
-                    val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.accent.toArgb() }
-                    val by = y + dp(13f)
-                    if (bx1 > bx0 + dp(20f)) {
-                        cv.drawRoundRect(RectF(bx0 + dp(4f), by, bx1, by + dp(5f)), dp(3f), dp(3f), track)
-                        val x0 = bx0 + dp(4f) + ((d.tMin - lo) / span * (bx1 - bx0 - dp(4f))).toFloat()
-                        val x1 = bx0 + dp(4f) + ((d.tMax - lo) / span * (bx1 - bx0 - dp(4f))).toFloat()
-                        cv.drawRoundRect(RectF(x0, by, x1.coerceAtLeast(x0 + dp(5f)), by + dp(5f)), dp(3f), dp(3f), bar)
-                    }
-                } else {
-                    cv.drawText(fmt.temp(d.tMin), w - pad - dp(40f), y + dp(20f), p.text(12f, c.inkDim, align = Paint.Align.RIGHT))
-                }
-                cv.drawText(fmt.temp(d.tMax), w - pad, y + dp(20f), p.text(13f, c.ink, true, Paint.Align.RIGHT))
-                y += rowH
-            }
+            pills(f.days.take(12).map { d ->
+                val name = if (d.date == todayDate) "Oggi"
+                    else d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ITALY).replaceFirstChar { it.uppercase() }.trimEnd('.')
+                PillItem(name, d.code, true, fmt.temp(d.tMax), d.precipProb, d.precipSum)
+            }, daysDp, f.days.firstOrNull()?.date == todayDate)
+            y += dp(daysDp) + dp(10f)
             closeZone("days", h.toFloat())
         }
         // l'ultima zona arriva fino in fondo
