@@ -34,6 +34,8 @@ data class Settings(
     val sourceId: String = "ecmwf",
     val radarId: String = "auto",
     val radarModel: String = "icon2i",
+    /** Luminosità della mappa, 30..100 %. */
+    val mapBrightness: Int = 100,
     val icon2iHours: Int = 12,
     /** Animazioni della card principale: "once" (all'apertura), "always", "icons", "off". */
     val animations: String = "once",
@@ -100,12 +102,13 @@ object Prefs {
             radarId = p.getString("radarId", d.radarId) ?: d.radarId,
             radarModel = (p.getString("radarModel", d.radarModel) ?: d.radarModel).let {
                 when (it) {
-                    "icon2i", "wrf", "gfs", "iconeu", "icond2", "ecmwf" -> it
+                    "icon2i", "wrf", "gfs", "iconeu", "icond2", "ecmwf", "multi" -> it
                     "icon_seamless" -> "iconeu"
                     else -> d.radarModel
                 }
             },
             icon2iHours = p.getInt("icon2iHours", d.icon2iHours),
+            mapBrightness = p.getInt("mapBrightness", d.mapBrightness).coerceIn(30, 100),
             animations = p.getString("animations", d.animations) ?: d.animations,
             showLightning = p.getBoolean("showLightning", d.showLightning),
             useWallpaper = p.getBoolean("useWallpaper", d.useWallpaper),
@@ -151,6 +154,7 @@ object Prefs {
             .putString("sourceId", s.sourceId)
             .putString("radarId", s.radarId)
             .putString("radarModel", s.radarModel)
+            .putInt("mapBrightness", s.mapBrightness)
             .putInt("icon2iHours", s.icon2iHours)
             .putString("animations", s.animations)
             .putBoolean("showLightning", s.showLightning)

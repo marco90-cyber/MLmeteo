@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -203,7 +205,7 @@ fun RadarPreview(place: Place) {
     val state = remember(place.id) { MapState(place.lat, place.lon, 6.0) }
     val fr = RadarCache.frames
     val layers = buildList {
-        add(baseLayer(c.dark))
+        add(baseLayer(c.dark, AppState.settings.mapBrightness / 100f))
         fr?.frames?.lastOrNull()?.let { add(rainViewerLayer(fr.host, it.second)) }
     }
     TileMap(state, layers, interactive = false) { project, _ ->
@@ -248,6 +250,7 @@ class HiRes(
 )
 
 fun layersFor(model: String): List<MapLayer> = when (model) {
+    "multi" -> listOf(MapLayer.RAIN)
     "icon2i" -> listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD,
         MapLayer.CLOUD_LOW, MapLayer.CLOUD_MID, MapLayer.CLOUD_HIGH, MapLayer.SNOW, MapLayer.LPI,
         MapLayer.PRESSURE, MapLayer.CAPE, MapLayer.T850, MapLayer.SNOWLINE, MapLayer.SNOW_DEPTH)
@@ -261,6 +264,7 @@ fun layersFor(model: String): List<MapLayer> = when (model) {
 
 /** Il modello copre questo punto? */
 fun modelCovers(model: String, lat: Double, lon: Double): Boolean = when (model) {
+    "multi" -> MultiMap.contains(lat, lon)
     "wrf" -> Wrf.contains(lat, lon)
     "gfs" -> lat in Gfs.SOUTH..Gfs.NORTH && lon in Gfs.WEST..Gfs.EAST
     "iconeu" -> IconEu.m.contains(lat, lon)
@@ -270,6 +274,7 @@ fun modelCovers(model: String, lat: Double, lon: Double): Boolean = when (model)
 }
 
 suspend fun loadHiRes(model: String, layer: MapLayer, hours: Int, progress: (Int, Int) -> Unit): HiRes = when (model) {
+    "multi" -> MultiMap.load(progress).toHiRes(MapLayer.RAIN)
     "iconeu" -> IconEu.m.load(layer, hours, progress).toHiRes(layer)
     "icond2" -> IconD2.m.load(layer, hours.coerceAtMost(48), progress).toHiRes(layer)
     "ecmwf" -> Ecmwf.load(layer, hours, progress).toHiRes(layer)
@@ -317,6 +322,7 @@ object HiResCache {
 private enum class RadarMode { DPC, RAINVIEWER, MODEL }
 
 val MapModels = listOf(
+    "multi" to "Multimodello",
     "icon2i" to "ICON-2I 2 km",
     "wrf" to "WRF 1,5 km",
     "icond2" to "ICON-D2 2 km",
@@ -327,6 +333,7 @@ val MapModels = listOf(
 
 /** Ore massime di previsione per modello. */
 fun modelMaxHours(model: String) = when (model) {
+    "multi" -> MultiMap.HOURS
     "icon2i" -> 24
     "icond2" -> 48
     else -> 72
@@ -523,7 +530,7 @@ fun RadarScreen() {
         !(mode == RadarMode.DPC && dpc?.getOrNull(dpcIndex)?.forecast == true)
 
     val layers = buildList {
-        add(baseLayer(c.dark))
+        add(baseLayer(c.dark, AppState.settings.mapBrightness / 100f))
         if (mode == RadarMode.RAINVIEWER && frames != null) {
             frames.frames.getOrNull(frame)?.let { add(rainViewerLayer(frames.host, it.second)) }
         }
@@ -623,6 +630,7 @@ fun RadarScreen() {
                             when {
                                 mode == RadarMode.DPC -> "Radar Protezione Civile + previsto 60 min"
                                 mode == RadarMode.RAINVIEWER -> "Radar RainViewer"
+                                model == "multi" -> "Pioggia Multimodello (media di 4 modelli, 6 ore)"
                                 model == "wrf" -> "Previsione WRF (1,5 km)"
                                 model == "gfs" -> "Previsione GFS HD (0,25°)"
                                 model == "iconeu" -> "Previsione ICON-EU (6,5 km)"
@@ -799,6 +807,7 @@ fun RadarScreen() {
                         mode == RadarMode.DPC -> "Radar: Dipartimento della Protezione Civile"
                         mode == RadarMode.RAINVIEWER -> "Rain Viewer"
                         model == "wrf" -> "WRF: ItaliaMeteo"
+                        model == "multi" -> "Multimodello: ItaliaMeteo / ARPAE, Deutscher Wetterdienst"
                         model == "gfs" -> "GFS: NOAA"
                         model == "iconeu" || model == "icond2" -> "ICON: Deutscher Wetterdienst"
                         model == "ecmwf" -> "ECMWF open data (CC-BY 4.0)"
@@ -812,12 +821,44 @@ fun RadarScreen() {
     }
 
     if (showSources) {
-        ChoiceDialog(
-            "Radar",
-            RadarSource.entries.map { Choice(it.id, it.title, it.info, it.available) },
-            s.radarId,
-            onPick = { id -> AppState.update { it.copy(radarId = id) }; playing = false; showSources = false },
-            onDismiss = { showSources = false },
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showSources = false },
+            containerColor = c.card,
+            title = { Text("Mappa e radar", color = c.ink) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Luminosità della mappa", color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Slider(
+                            value = s.mapBrightness.toFloat(),
+                            onValueChange = { v -> AppState.update { it.copy(mapBrightness = (v / 5).roundToInt() * 5) } },
+                            valueRange = 30f..100f,
+                            modifier = Modifier.weight(1f),
+                            colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
+                        )
+                        Gap(8)
+                        Text("${s.mapBrightness}%", color = c.inkDim, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text("Radar", color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    RadarSource.entries.forEach { r ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable(enabled = r.available) {
+                                AppState.update { it.copy(radarId = r.id) }; playing = false; showSources = false
+                            }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.RadioButton(selected = s.radarId == r.id, enabled = r.available,
+                                onClick = { AppState.update { it.copy(radarId = r.id) }; playing = false; showSources = false })
+                            Column {
+                                Text(r.title, color = if (r.available) c.ink else c.inkDim, fontSize = 15.sp)
+                                if (r.info.isNotBlank()) Text(r.info, color = c.inkDim, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { showSources = false }) { Text("Chiudi", color = c.accent) } },
         )
     }
 }

@@ -924,54 +924,85 @@ private fun RainChartCard(f: Forecast, fmt: Fmt) {
     val maxMm = (hours.maxOf { if (it.precip.ok()) it.precip else 0.0 }).coerceAtLeast(2.0)
     val total = hours.sumOf { if (it.precip.ok()) it.precip else 0.0 }
     val hasProb = hours.any { it.precipProb.ok() }
+    val maxProb = hours.mapNotNull { h -> h.precipProb.takeIf { it.ok() } }.maxOrNull()
+    val probCol = Color(0xFF64B5F6)
+    val mmCol = Color(0xFF1E88E5)
     CardBox {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Pioggia nelle prossime 24 ore", color = c.accent, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             Text(fmt.rain(total), color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            if (maxProb != null) {
+                Text(" · ", color = c.inkDim, fontSize = 14.sp)
+                Text("${maxProb.roundToInt()}%", color = probCol, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Spacer(Modifier.height(12.dp))
         Row {
-            Column(Modifier.height(100.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Text(fmt.rain(maxMm), color = c.inkDim, fontSize = 11.sp)
-                Text("0", color = c.inkDim, fontSize = 11.sp)
+            // scala dei mm a sinistra
+            Column(Modifier.height(110.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                Text(fmt.rain(maxMm), color = mmCol, fontSize = 11.sp)
+                Text(fmt.rain(maxMm / 2), color = mmCol, fontSize = 11.sp)
+                Text("0", color = mmCol, fontSize = 11.sp)
             }
-            Gap(8)
-            Canvas(Modifier.weight(1f).height(100.dp)) {
+            Gap(6)
+            Canvas(Modifier.weight(1f).height(110.dp)) {
                 val n = hours.size
                 val slot = size.width / n
-                val bw = slot * 0.62f
-                drawLine(c.outline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+                val bw = slot * 0.55f
+                // righe guida 0 / 50 / 100
+                for (f in listOf(0f, 0.5f, 1f)) {
+                    drawLine(c.outline.copy(alpha = if (f == 1f) 1f else 0.5f), Offset(0f, size.height * f), Offset(size.width, size.height * f), 1.dp.toPx())
+                }
+                // probabilità: area azzurra piena
+                if (hasProb) {
+                    val line = Path(); val area = Path()
+                    hours.forEachIndexed { i, h ->
+                        val pr = if (h.precipProb.ok()) h.precipProb else 0.0
+                        val x = i * slot + slot / 2
+                        val y = (size.height * (1 - pr / 100.0)).toFloat()
+                        if (i == 0) { line.moveTo(x, y); area.moveTo(x, size.height); area.lineTo(x, y) } else { line.lineTo(x, y); area.lineTo(x, y) }
+                        if (i == n - 1) { area.lineTo(x, size.height); area.close() }
+                    }
+                    drawPath(area, probCol.copy(alpha = 0.35f))
+                    drawPath(line, probCol, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                }
+                // millimetri: barre
                 hours.forEachIndexed { i, h ->
                     val v = if (h.precip.ok()) h.precip else 0.0
                     if (v > 0.0) {
                         val bh = (v / maxMm * size.height).toFloat().coerceAtLeast(2.dp.toPx())
                         drawRoundRect(
-                            Color(0xFF29B6F6), topLeft = Offset(i * slot + (slot - bw) / 2, size.height - bh),
+                            mmCol, topLeft = Offset(i * slot + (slot - bw) / 2, size.height - bh),
                             size = Size(bw, bh), cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
                         )
                     }
                 }
-                if (hasProb) {
-                    val p = Path()
-                    hours.forEachIndexed { i, h ->
-                        val pr = if (h.precipProb.ok()) h.precipProb else 0.0
-                        val x = i * slot + slot / 2
-                        val y = (size.height * (1 - pr / 100.0)).toFloat()
-                        if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
-                    }
-                    drawPath(p, c.accent, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))))
+            }
+            if (hasProb) {
+                Gap(6)
+                // scala della probabilità a destra
+                Column(Modifier.height(110.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+                    Text("100%", color = probCol, fontSize = 11.sp)
+                    Text("50%", color = probCol, fontSize = 11.sp)
+                    Text("0%", color = probCol, fontSize = 11.sp)
                 }
             }
         }
         Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth().padding(start = 30.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(start = 34.dp, end = if (hasProb) 34.dp else 0.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             listOf(0, 6, 12, 18, 23).forEach { idx ->
                 Text(if (idx == 0) "Ora" else hours.getOrNull(idx)?.let { fmt.hourLabel(it.time) } ?: "", color = c.inkDim, fontSize = 12.sp)
             }
         }
-        if (hasProb) {
-            Spacer(Modifier.height(4.dp))
-            Text("Barre: millimetri · linea tratteggiata: probabilità", color = c.inkDim, fontSize = 11.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(mmCol))
+            Gap(6); Text("Millimetri", color = c.inkDim, fontSize = 11.sp)
+            if (hasProb) {
+                Gap(14)
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(probCol.copy(alpha = 0.6f)))
+                Gap(6); Text("Probabilità", color = c.inkDim, fontSize = 11.sp)
+            }
         }
     }
 }

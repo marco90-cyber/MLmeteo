@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.io.File
 
 /** Tipo di widget: meteo (si adatta alla grandezza), mini 1×1, radar. */
-enum class WidgetKind { WEATHER, MINI, RADAR }
+enum class WidgetKind { WEATHER, MINI, RADAR, RAIN }
 
 /** Impostazioni di un singolo widget, scelte con la procedura guidata. */
 data class WidgetCfg(
@@ -33,13 +33,17 @@ data class WidgetCfg(
     val tapHours: String = "app",
     val tapRain: String = "radar",
     val tapDays: String = "app",
+    /** Grandezza dei singoli elementi, in percentuale (100 = normale). */
+    val sizes: Map<String, Int> = emptyMap(),
 ) {
+    fun size(key: String): Float = (sizes[key] ?: 100).coerceIn(60, 160) / 100f
     fun toJson(): String = JSONObject().apply {
         put("place", place); put("showCurrent", showCurrent); put("showHours", showHours); put("showRain", showRain)
         put("showDays", showDays); put("showAlert", showAlert); put("showUpdated", showUpdated)
         put("extras", JSONArray(extras)); put("opacity", opacity); put("colorMode", colorMode); put("customColor", customColor)
         put("textMode", textMode); put("corner", corner)
         put("tapMain", tapMain); put("tapHours", tapHours); put("tapRain", tapRain); put("tapDays", tapDays)
+        put("sizes", JSONObject().apply { sizes.forEach { (k, v) -> put(k, v) } })
     }.toString()
 
     companion object {
@@ -65,6 +69,7 @@ data class WidgetCfg(
                     tapHours = o.optString("tapHours", def.tapHours),
                     tapRain = o.optString("tapRain", def.tapRain),
                     tapDays = o.optString("tapDays", def.tapDays),
+                    sizes = o.optJSONObject("sizes")?.let { j -> j.keys().asSequence().associateWith { j.optInt(it, 100) } } ?: def.sizes,
                 )
             } catch (e: Exception) { def }
         }
@@ -80,6 +85,17 @@ val WidgetExtras = listOf(
     "sun" to "Alba e tramonto",
     "air" to "Qualità dell'aria",
     "pressure" to "Pressione",
+)
+
+/** Elementi di cui si può cambiare la grandezza. */
+val WidgetSizeKeys = listOf(
+    "current" to "Meteo attuale (icona e temperatura)",
+    "extras" to "Dati extra",
+    "hoursIcon" to "Prossime ore: icone",
+    "hoursText" to "Prossime ore: testo",
+    "rain" to "Grafico pioggia",
+    "daysIcon" to "Prossimi giorni: icone",
+    "daysText" to "Prossimi giorni: testo",
 )
 
 /** Azioni al tocco. */
@@ -101,8 +117,12 @@ object WidgetStore {
     }
 
     fun remove(ctx: Context, id: Int) {
-        sp(ctx).edit().remove("c$id").remove("w$id").apply()
+        sp(ctx).edit().remove("c$id").remove("w$id").remove("x$id").apply()
     }
+
+    /** Widget rimosso dalla pagina Widget: non si aggiorna più (Android non permette all'app di toglierlo dalla Home). */
+    fun markRemoved(ctx: Context, id: Int) { sp(ctx).edit().putBoolean("x$id", true).apply() }
+    fun isRemoved(ctx: Context, id: Int) = sp(ctx).getBoolean("x$id", false)
 
     // ------------------------------------------------------------------ allerte e aria (per i widget)
 

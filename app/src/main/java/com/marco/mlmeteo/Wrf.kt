@@ -392,6 +392,15 @@ object Wrf {
         return Paint.bitmap(out, W, h, layer)
     }
 
+    /** Valore (mm/h, °C…) nel pixel della griglia più vicino a (lat, lon). */
+    fun sampleAt(vals: ShortArray, lat: Double, lon: Double): Float {
+        val i = ((lonToX(lon) - lonToX(WEST)) / (lonToX(EAST) - lonToX(WEST)) * W).toInt()
+        val j = ((latToY(lat) - latToY(NORTH)) / (latToY(SOUTH) - latToY(NORTH)) * H).toInt()
+        if (i !in 0 until W || j !in 0 until H) return Float.NaN
+        val a = vals[j * W + i]
+        return if (a == NODATA) Float.NaN else a / 10f
+    }
+
     /** Vento (u, v in km/h) nel pixel della griglia di uscita più vicino a (lat, lon). */
     fun windAt(d: Data, k: Int, lat: Double, lon: Double): Pair<Float, Float>? {
         val us = d.u?.getOrNull(k) ?: return null

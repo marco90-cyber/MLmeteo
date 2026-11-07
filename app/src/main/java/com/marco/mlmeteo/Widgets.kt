@@ -20,6 +20,7 @@ import android.widget.RemoteViews
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Eco
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.WaterDrop
@@ -70,6 +71,7 @@ class WidgetSmall : BaseWidget(WidgetKind.WEATHER)
 class WidgetLarge : BaseWidget(WidgetKind.WEATHER)
 class WidgetMini : BaseWidget(WidgetKind.MINI)
 class WidgetRadar : BaseWidget(WidgetKind.RADAR)
+class WidgetRain : BaseWidget(WidgetKind.RAIN)
 
 /**
  * Widget disegnati come immagine, con la stessa grafica, la stessa fonte e gli stessi dati dell'app.
@@ -82,6 +84,7 @@ object Widgets {
         WidgetLarge::class.java to WidgetKind.WEATHER,
         WidgetMini::class.java to WidgetKind.MINI,
         WidgetRadar::class.java to WidgetKind.RADAR,
+        WidgetRain::class.java to WidgetKind.RAIN,
     )
 
     /** Tutti i widget messi: (id, tipo). */
@@ -108,7 +111,8 @@ object Widgets {
     }
 
     /** Località usate dai widget (per aggiornarle in background). */
-    fun placeIds(ctx: Context): List<String> = all(ctx).mapNotNull { placeFor(ctx, it.first)?.id }.distinct()
+    fun placeIds(ctx: Context): List<String> = all(ctx).filter { !WidgetStore.isRemoved(ctx, it.first) }
+        .mapNotNull { placeFor(ctx, it.first)?.id }.distinct()
 
     const val ACTION_REFRESH = "com.marco.mlmeteo.WIDGET_REFRESH"
 
@@ -162,6 +166,7 @@ object Widgets {
         WidgetKind.WEATHER -> 320 to 190
         WidgetKind.MINI -> 80 to 80
         WidgetKind.RADAR -> 320 to 190
+        WidgetKind.RAIN -> 320 to 160
     }
 
     /** Pixel dell'immagine per ogni dp (ridotti se il widget è enorme, per restare sotto i limiti di Android). */
@@ -174,6 +179,13 @@ object Widgets {
     private fun action(ctx: Context, id: Int, what: String, slot: Int): PendingIntent {
         val code = id * 10 + slot
         return when (what) {
+            "settings" -> PendingIntent.getActivity(
+                ctx, code,
+                Intent(ctx, WidgetConfigActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                    .setData(android.net.Uri.parse("mlmeteo://widget/$id")),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
             "refresh" -> PendingIntent.getBroadcast(
                 ctx, code, Intent(ctx, WidgetRefreshReceiver::class.java).setAction(ACTION_REFRESH),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -194,6 +206,7 @@ object Widgets {
     fun update(ctx: Context, m: AppWidgetManager, id: Int, kind: WidgetKind) {
         try {
             val (wDp, hDp) = sizeDp(ctx, m, id, kind)
+            if (WidgetStore.isRemoved(ctx, id)) { m.updateAppWidget(id, removedViews(ctx, wDp, hDp)); return }
             val cfg = WidgetStore.cfg(ctx, id)
             val place = placeFor(ctx, id, cfg)
             val busy = refreshing(ctx)
@@ -220,8 +233,17 @@ object Widgets {
             rv.setOnClickPendingIntent(R.id.widget_refresh, action(ctx, id, "refresh", 6))
             rv.setInt(R.id.widget_refresh, "setColorFilter", (if (busy) c.accent else c.inkDim).toArgb())
             rv.setViewVisibility(R.id.widget_refresh, if (showRefresh) View.VISIBLE else View.GONE)
+            // ingranaggio (widget pioggia): apre le impostazioni del widget
+            if (kind == WidgetKind.RAIN && showRefresh) {
+                val gp = (24 * dens).roundToInt()
+                val gb = Bitmap.createBitmap(gp, gp, Bitmap.Config.ARGB_8888)
+                drawVector(android.graphics.Canvas(gb), Icons.Filled.Settings, 0f, 0f, gp.toFloat(), c.inkDim.toArgb())
+                rv.setImageViewBitmap(R.id.widget_settings, gb)
+                rv.setViewVisibility(R.id.widget_settings, View.VISIBLE)
+                rv.setOnClickPendingIntent(R.id.widget_settings, action(ctx, id, "settings", 8))
+            } else rv.setViewVisibility(R.id.widget_settings, View.GONE)
             // pallino allerta
-            val lvl = if (cfg.showAlert && place != null) WidgetStore.alertLevel(ctx, place.id) else 0
+            val lvl = if (cfg.showAlert && place != null && kind != WidgetKind.RAIN) WidgetStore.alertLevel(ctx, place.id) else 0
             val dotView = if (showRefresh) R.id.widget_alert else R.id.widget_alert2
             val other = if (showRefresh) R.id.widget_alert2 else R.id.widget_alert
             rv.setViewVisibility(other, View.GONE)
@@ -232,6 +254,21 @@ object Widgets {
             } else rv.setViewVisibility(dotView, View.GONE)
             m.updateAppWidget(id, rv)
         } catch (e: Exception) { }
+    }
+
+    /** Widget rimosso dalla pagina Widget: un messaggio e nessun tocco. */
+    private fun removedViews(ctx: Context, wDp: Int, hDp: Int): RemoteViews {
+        val p = Pen(ctx, WidgetCfg(opacity = 70), wDp, hDp)
+        p.background()
+        val t1 = p.text(13f, p.c.ink, true, Paint.Align.CENTER)
+        val t2 = p.text(11f, p.c.inkDim, align = Paint.Align.CENTER)
+        p.cv.drawText(p.fit(t1, "Widget rimosso", p.w - p.dp(16f)), p.w / 2f, p.h / 2f - p.dp(2f), t1)
+        p.cv.drawText(p.fit(t2, "Tienilo premuto per toglierlo", p.w - p.dp(16f)), p.w / 2f, p.h / 2f + p.dp(14f), t2)
+        val rv = RemoteViews(ctx.packageName, R.layout.widget_image)
+        rv.setImageViewBitmap(R.id.widget_image, p.bmp)
+        listOf(R.id.zone_main, R.id.zone_hours, R.id.zone_rain, R.id.zone_days, R.id.widget_alert, R.id.widget_alert2,
+            R.id.widget_refresh, R.id.widget_settings).forEach { rv.setViewVisibility(it, View.GONE) }
+        return rv
     }
 
     /** Pallino colorato con il punto esclamativo. */
@@ -276,7 +313,7 @@ object Widgets {
     }
 
     /** Disegna un'icona Material (vettoriale) sul Canvas di Android. */
-    private fun drawVector(cv: android.graphics.Canvas, v: ImageVector, x: Float, y: Float, size: Float, color: Int) {
+    fun drawVector(cv: android.graphics.Canvas, v: ImageVector, x: Float, y: Float, size: Float, color: Int) {
         val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
         val m = android.graphics.Matrix()
         m.setScale(size / v.viewportWidth, size / v.viewportHeight)
@@ -302,6 +339,7 @@ object Widgets {
             WidgetKind.WEATHER -> drawWeatherWidget(ctx, cfg, wDp, hDp, place, f, busy)
             WidgetKind.MINI -> Rendered(drawMini(ctx, cfg, wDp, hDp, f), emptyList())
             WidgetKind.RADAR -> Rendered(drawRadar(ctx, cfg, wDp, hDp, place, busy), emptyList())
+            WidgetKind.RAIN -> Rendered(drawRainWidget(ctx, cfg, wDp, hDp, place, f, busy), emptyList())
         }
     }
 
@@ -409,28 +447,32 @@ object Widgets {
         val ex = extrasFor(ctx, cfg, place, f)
         // con il widget largo i dati extra vanno a destra della temperatura (spazio che altrimenti resta vuoto)
         val sideExtras = cfg.showCurrent && ex.isNotEmpty() && wDp >= 290
-        val icDp = if (hDp < 170) 52f else 64f
+        val sCur = cfg.size("current"); val sEx = cfg.size("extras"); val sRain = cfg.size("rain")
+        val hIs = cfg.size("hoursIcon"); val hTs = cfg.size("hoursText"); val dIs = cfg.size("daysIcon"); val dTs = cfg.size("daysText")
+        val icDp = (if (hDp < 170) 52f else 64f) * sCur
         val headerDp = 16f + (if (cfg.showUpdated || sideExtras) 16f else 0f) + 8f
         var free = hDp - (pad / p.scale) - headerDp - (if (cfg.showCurrent) icDp + 10f else 0f) - 6f
         val hrs24 = f.hours.take(24)
         val anyRain = hrs24.any { (it.precip.ok() && it.precip >= 0.1) || (it.precipProb.ok() && it.precipProb >= 20) }
-        // pillole: complete (con % e mm) 100 dp, compatte 62 dp
-        fun pillDp(): Float = if (free >= 110f) 100f else if (free >= 72f) 62f else 0f
+        // pillole: complete (con % e mm) o compatte; l'altezza dipende dalla grandezza di icone e testo
+        fun fullDp(isz: Float, ts: Float) = 22f * ts + 32f * isz + 16f * ts + 14f * ts + 12f * ts + 8f
+        fun smallDp(isz: Float, ts: Float) = 18f * ts + 24f * isz + 14f * ts + 6f
+        fun pillDp(isz: Float, ts: Float): Float = if (free >= fullDp(isz, ts) + 10f) fullDp(isz, ts) else if (free >= smallDp(isz, ts) + 10f) smallDp(isz, ts) else 0f
         var hoursDp = 0f
         if (cfg.showHours) {
-            hoursDp = pillDp()
+            hoursDp = pillDp(hIs, hTs)
             if (hoursDp > 0) free -= hoursDp + 10f
         }
         var extrasRow = false
-        if (!sideExtras && ex.isNotEmpty() && free >= 38f) { extrasRow = true; free -= 38f }
+        if (!sideExtras && ex.isNotEmpty() && free >= 38f * sEx) { extrasRow = true; free -= 38f * sEx }
         var rainDp = 0f
         if (cfg.showRain && hrs24.isNotEmpty()) {
-            val want = if (anyRain) 76f else 30f
+            val want = if (anyRain) 36f + 40f * sRain else 30f
             if (free >= want + 10f) { rainDp = want; free -= want + 10f }
         }
         var daysDp = 0f
         if (cfg.showDays && f.days.isNotEmpty()) {
-            daysDp = pillDp()
+            daysDp = pillDp(dIs, dTs)
             if (daysDp > 0) free -= daysDp + 10f
         }
         // lo spazio che avanza viene diviso tra le parti
@@ -457,7 +499,7 @@ object Widgets {
         if (cfg.showCurrent) {
             val ic = dp(icDp).toInt()
             cv.drawBitmap(icon(cur.code, cur.isDay, ic, s.iconSet, c), pad, y, null)
-            val tp = p.text(if (hDp < 170) 36f else 44f, c.ink, true)
+            val tp = p.text((if (hDp < 170) 36f else 44f) * sCur, c.ink, true)
             val tX = pad + ic + dp(12f)
             cv.drawText(fmt.temp(cur.temp), tX, y + ic * 0.72f, tp)
             val tx = tX + tp.measureText(fmt.temp(cur.temp)) + dp(14f)
@@ -477,7 +519,7 @@ object Widgets {
                         p.pill(x0 + dp(2f), y0, x0 + cw - dp(2f), y0 + ch, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
                         val isz = (ch * 0.58f).coerceAtMost(dp(16f))
                         drawVector(cv, iv, x0 + dp(9f), y0 + (ch - isz) / 2, isz, c.accent.toArgb())
-                        val tpe = p.text(12f, c.ink)
+                        val tpe = p.text(12f * sEx, c.ink)
                         cv.drawText(p.fit(tpe, v, cw - isz - dp(20f)), x0 + dp(13f) + isz, y0 + ch / 2 + dp(4.5f), tpe)
                     }
                 }
@@ -491,15 +533,15 @@ object Widgets {
 
         // --- dati extra in riga (widget stretti)
         fun extrasLine() {
-            val n = ((w - pad * 2) / dp(74f)).toInt().coerceIn(1, ex.size)
+            val n = ((w - pad * 2) / dp(74f * sEx)).toInt().coerceIn(1, ex.size)
             val colW = (w - pad * 2) / n
             ex.take(n).forEachIndexed { i, (iv, v) ->
                 val x0 = pad + colW * i
-                p.pill(x0 + dp(2f), y, x0 + colW - dp(2f), y + dp(28f), c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
-                drawVector(cv, iv, x0 + dp(10f), y + dp(6f), dp(16f), c.accent.toArgb())
-                cv.drawText(p.fit(p.text(12f, c.ink), v, colW - dp(36f)), x0 + dp(30f), y + dp(19f), p.text(12f, c.ink))
+                p.pill(x0 + dp(2f), y, x0 + colW - dp(2f), y + dp(28f * sEx), c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
+                drawVector(cv, iv, x0 + dp(10f * sEx), y + dp(6f * sEx), dp(16f * sEx), c.accent.toArgb())
+                cv.drawText(p.fit(p.text(12f * sEx, c.ink), v, colW - dp(36f * sEx)), x0 + dp(30f * sEx), y + dp(19f * sEx), p.text(12f * sEx, c.ink))
             }
-            y += dp(28f) + dp(10f) + gap
+            y += dp(28f * sEx) + dp(10f) + gap
         }
         if (extrasRow) extrasLine()
         closeZone("main", y - gap / 2)
@@ -507,10 +549,11 @@ object Widgets {
         // --- pillole (ore e giorni): etichetta, icona, temperatura, % e mm di pioggia
         val rainBlue = Color(0xFF6CB8FF)
         class PillItem(val label: String, val code: Int, val isDay: Boolean, val temp: String, val prob: Double, val mm: Double)
-        fun pills(items: List<PillItem>, heightDp: Float, highlightFirst: Boolean) {
+        fun pills(items: List<PillItem>, heightDp: Float, highlightFirst: Boolean, isz: Float, ts: Float) {
             val hh = dp(heightDp)
-            val small = heightDp < 70f
-            val n = ((w - pad * 2) / dp(if (small) 46f else 52f)).toInt().coerceIn(3, 12).coerceAtMost(items.size)
+            val small = heightDp < fullDp(isz, ts) - 0.5f
+            val colDp = (if (small) 46f else 52f) * maxOf(ts, isz * 0.85f, 1f)
+            val n = ((w - pad * 2) / dp(colDp)).toInt().coerceIn(3, 12).coerceAtMost(items.size)
             if (n <= 0) return
             val colW = (w - pad * 2) / n
             items.take(n).forEachIndexed { i, item ->
@@ -519,13 +562,18 @@ object Widgets {
                 if (hl) p.pill(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hh, c.accentContainer)
                 else if (!small) p.pill(cx - colW / 2 + dp(2f), y, cx + colW / 2 - dp(2f), y + hh, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
                 val ink = if (hl) c.onAccentContainer else c.ink
-                cv.drawText(item.label, cx, y + dp(if (small) 14f else 18f), p.text(11f, if (hl) ink else c.inkDim, align = Paint.Align.CENTER))
-                val hi = dp(if (small) 20f else 26f).toInt()
-                cv.drawBitmap(icon(item.code, item.isDay, hi, s.iconSet, c), cx - hi / 2f, y + dp(if (small) 19f else 24f), null)
-                cv.drawText(item.temp, cx, y + dp(if (small) 53f else 68f), p.text(13f, ink, true, Paint.Align.CENTER))
+                var yy = y + dp((if (small) 14f else 16f) * ts)
+                cv.drawText(item.label, cx, yy, p.text(11f * ts, if (hl) ink else c.inkDim, align = Paint.Align.CENTER))
+                yy += dp(4f * ts)
+                val hi = dp((if (small) 24f else 32f) * isz).toInt()
+                cv.drawBitmap(icon(item.code, item.isDay, hi, s.iconSet, c), cx - hi / 2f, yy, null)
+                yy += hi + dp((if (small) 13f else 15f) * ts)
+                cv.drawText(item.temp, cx, yy, p.text(13f * ts, ink, true, Paint.Align.CENTER))
                 if (!small) {
-                    if (item.prob.ok() && item.prob >= 1) cv.drawText("${item.prob.roundToInt()}%", cx, y + dp(82f), p.text(10f, if (hl) ink else c.accent, true, Paint.Align.CENTER))
-                    if ((item.mm.ok() && item.mm >= 0.05) || (item.prob.ok() && item.prob >= 1)) cv.drawText(p.fit(p.text(10f, rainBlue, true), fmt.rain(if (item.mm.ok()) item.mm else 0.0), colW - dp(4f)), cx, y + dp(94f), p.text(10f, rainBlue, true, Paint.Align.CENTER))
+                    yy += dp(14f * ts)
+                    if (item.prob.ok() && item.prob >= 1) cv.drawText("${item.prob.roundToInt()}%", cx, yy, p.text(10f * ts, if (hl) ink else c.accent, true, Paint.Align.CENTER))
+                    yy += dp(12f * ts)
+                    if ((item.mm.ok() && item.mm >= 0.05) || (item.prob.ok() && item.prob >= 1)) cv.drawText(p.fit(p.text(10f * ts, rainBlue, true), fmt.rain(if (item.mm.ok()) item.mm else 0.0), colW - dp(4f)), cx, yy, p.text(10f * ts, rainBlue, true, Paint.Align.CENTER))
                 }
             }
         }
@@ -534,7 +582,7 @@ object Widgets {
         if (hoursDp > 0) {
             pills(f.hours.take(12).mapIndexed { i, hr ->
                 PillItem(if (i == 0) "Ora" else fmt.hourLabel(hr.time), hr.code, hr.isDay, fmt.temp(if (i == 0) cur.temp else hr.temp), hr.precipProb, hr.precip)
-            }, hoursDp, true)
+            }, hoursDp, true, hIs, hTs)
             y += dp(hoursDp) + dp(10f) + gap
             closeZone("hours", y - gap / 2)
         }
@@ -549,7 +597,7 @@ object Widgets {
                 val total = hrs.sumOf { if (it.precip.ok()) it.precip else 0.0 }
                 cv.drawText("Pioggia prossime ${hrs.size} ore", pad, y + dp(13f), p.text(12f, c.ink, true))
                 cv.drawText(fmt.rain(total), w - pad, y + dp(13f), p.text(12f, c.accent, true, Paint.Align.RIGHT))
-                val top = y + dp(20f); val bottom = y + dp(60f)
+                val top = y + dp(20f); val bottom = y + dp(20f + 40f * sRain)
                 val maxMm = hrs.maxOf { if (it.precip.ok()) it.precip else 0.0 }.coerceAtLeast(2.0)
                 val hasProb = hrs.any { it.precipProb.ok() }
                 val bw = (w - pad * 2) / hrs.size
@@ -584,7 +632,7 @@ object Widgets {
                 val name = if (d.date == todayDate) "Oggi"
                     else d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ITALY).replaceFirstChar { it.uppercase() }.trimEnd('.')
                 PillItem(name, d.code, true, fmt.temp(d.tMax), d.precipProb, d.precipSum)
-            }, daysDp, f.days.firstOrNull()?.date == todayDate)
+            }, daysDp, f.days.firstOrNull()?.date == todayDate, dIs, dTs)
             y += dp(daysDp) + dp(10f)
             closeZone("days", h.toFloat())
         }
@@ -626,6 +674,73 @@ object Widgets {
             }
         }
     }
+
+    // ------------------------------------------------------------------ grafico pioggia
+
+    /** Probabilità di pioggia (area) e millimetri (barre) nelle prossime ore: più è largo, più ore. */
+    private fun drawRainWidget(ctx: Context, cfg: WidgetCfg, wDp: Int, hDp: Int, place: Place?, f: Forecast?, busy: Boolean): Bitmap {
+        val p = Pen(ctx, cfg, wDp, hDp)
+        val c = p.c; val cv = p.cv; val w = p.w; val h = p.h
+        fun dp(v: Float) = p.dp(v)
+        p.background()
+        val pad = dp(14f)
+        val probCol = Color(0xFF64B5F6); val mmCol = Color(0xFF1E88E5)
+        if (place == null || f == null) {
+            cv.drawText(if (busy) "Aggiornamento…" else "Pioggia: tocca ⟳", pad, pad + dp(16f), p.text(13f, c.ink, true))
+            return p.bmp
+        }
+        val n = ((wDp - 60) / 13).coerceIn(6, 24)
+        val hrs = f.hours.take(n)
+        val total = hrs.sumOf { if (it.precip.ok()) it.precip else 0.0 }
+        val maxProb = hrs.mapNotNull { x -> x.precipProb.takeIf { it.ok() } }.maxOrNull()
+        val rightSpace = if (wDp >= 140) dp(72f) else 0f
+        val title = if (wDp >= 260) "Pioggia · ${place.name}" else "Pioggia"
+        cv.drawText(p.fit(p.text(14f, c.ink, true), title, w - pad * 2 - rightSpace), pad, pad + dp(14f), p.text(14f, c.ink, true))
+        val sub = fmt2(p.fmt, total) + (maxProb?.let { " · max ${it.roundToInt()}%" } ?: "")
+        cv.drawText(p.fit(p.text(11f, c.inkDim), sub, w - pad * 2 - rightSpace), pad, pad + dp(30f), p.text(11f, c.inkDim))
+        val axisW = dp(34f)
+        val left = pad + axisW; val right = w - pad
+        val top = pad + dp(44f); val bottom = h - pad - dp(16f)
+        if (bottom - top < dp(24f) || hrs.size < 2) return p.bmp
+        val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.outline.toArgb(); strokeWidth = dp(1f) }
+        listOf(0f, 0.5f, 1f).forEachIndexed { i, fr ->
+            val yy = top + (bottom - top) * fr
+            cv.drawLine(left, yy, right, yy, grid)
+            cv.drawText(listOf("100%", "50%", "0%")[i], left - dp(6f), yy + dp(4f), p.text(10f, probCol, align = Paint.Align.RIGHT))
+        }
+        val slot = (right - left) / hrs.size
+        // area della probabilità
+        val path = Path(); val line = Path()
+        hrs.forEachIndexed { i, x ->
+            val pr = if (x.precipProb.ok()) x.precipProb else 0.0
+            val px = left + slot * i + slot / 2
+            val py = (bottom - (bottom - top) * pr / 100.0).toFloat()
+            if (i == 0) { path.moveTo(px, bottom); path.lineTo(px, py); line.moveTo(px, py) } else { path.lineTo(px, py); line.lineTo(px, py) }
+            if (i == hrs.lastIndex) { path.lineTo(px, bottom); path.close() }
+        }
+        cv.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = probCol.copy(alpha = 0.4f).toArgb() })
+        cv.drawPath(line, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = probCol.toArgb(); style = Paint.Style.STROKE; strokeWidth = dp(2f); strokeJoin = Paint.Join.ROUND })
+        // barre dei millimetri
+        val maxMm = hrs.maxOf { if (it.precip.ok()) it.precip else 0.0 }.coerceAtLeast(2.0)
+        val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = mmCol.toArgb() }
+        hrs.forEachIndexed { i, x ->
+            val v = if (x.precip.ok()) x.precip else 0.0
+            if (v > 0) {
+                val bh = ((v / maxMm) * (bottom - top)).toFloat().coerceAtLeast(dp(2f))
+                val x0 = left + slot * i + slot * 0.22f
+                cv.drawRoundRect(RectF(x0, bottom - bh, x0 + slot * 0.56f, bottom), dp(2f), dp(2f), bar)
+            }
+        }
+        // ore
+        val step = when { hrs.size > 16 -> 4; hrs.size > 8 -> 3; else -> 2 }
+        for (i in hrs.indices step step) {
+            val px = left + slot * i + slot / 2
+            cv.drawText(if (i == 0) "Ora" else p.fmt.hourLabel(hrs[i].time), px, bottom + dp(13f), p.text(10f, c.inkDim, align = Paint.Align.CENTER))
+        }
+        return p.bmp
+    }
+
+    private fun fmt2(fmt: Fmt, mm: Double) = if (mm < 0.05) "Niente pioggia" else fmt.rain(mm)
 
     // ------------------------------------------------------------------ mini 1×1
 

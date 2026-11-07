@@ -34,6 +34,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Place
@@ -97,7 +99,7 @@ class WidgetConfigActivity : ComponentActivity() {
 }
 
 private enum class Step(val title: String) {
-    PLACE("Località"), CONTENT("Cosa mostrare"), EXTRAS("Dati extra"), LOOK("Aspetto"), TAP("Tocco")
+    PLACE("Località"), CONTENT("Cosa mostrare"), EXTRAS("Dati extra"), SIZE("Grandezza"), LOOK("Aspetto"), TAP("Tocco")
 }
 
 @Composable
@@ -128,7 +130,7 @@ private fun WidgetWizard(id: Int, kind: WidgetKind, start: WidgetCfg, onDone: (W
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Indietro", tint = c.ink)
             }
             Column(Modifier.weight(1f)) {
-                Text(when (kind) { WidgetKind.WEATHER -> "Widget MLMeteo"; WidgetKind.MINI -> "Widget Mini"; WidgetKind.RADAR -> "Widget Radar" },
+                Text(when (kind) { WidgetKind.WEATHER -> "Widget MLMeteo"; WidgetKind.MINI -> "Widget Mini"; WidgetKind.RADAR -> "Widget Radar"; WidgetKind.RAIN -> "Widget Pioggia" },
                     color = c.ink, fontSize = 20.sp, fontWeight = FontWeight.Medium)
                 Text("Passo ${step + 1} di ${steps.size} · ${steps[step].title}", color = c.inkDim, fontSize = 13.sp)
             }
@@ -169,6 +171,7 @@ private fun WidgetWizard(id: Int, kind: WidgetKind, start: WidgetCfg, onDone: (W
                 Step.PLACE -> PlaceStep(cfg) { cfg = it }
                 Step.CONTENT -> ContentStep(cfg) { cfg = it }
                 Step.EXTRAS -> ExtrasStep(cfg) { cfg = it }
+                Step.SIZE -> SizeStep(cfg) { cfg = it }
                 Step.LOOK -> LookStep(cfg, kind) { cfg = it }
                 Step.TAP -> TapStep(cfg, kind) { cfg = it }
             }
@@ -266,6 +269,38 @@ private fun ExtrasStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
 }
 
 @Composable
+private fun SizeStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
+    val c = LocalAppColors.current
+    Hint("Ingrandisci o rimpicciolisci ogni parte. Se non c'è più spazio, si nascondono prima le parti in fondo.")
+    val shown = WidgetSizeKeys.filter { (k, _) ->
+        when (k) {
+            "current" -> cfg.showCurrent
+            "extras" -> cfg.extras.isNotEmpty()
+            "hoursIcon", "hoursText" -> cfg.showHours
+            "rain" -> cfg.showRain
+            else -> cfg.showDays
+        }
+    }
+    shown.forEach { (key, label) ->
+        val v = cfg.sizes[key] ?: 100
+        CardBox {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, color = c.ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text("$v%", color = c.inkDim, fontSize = 14.sp)
+            }
+            Slider(
+                value = v.toFloat(), valueRange = 70f..150f,
+                onValueChange = { x -> set(cfg.copy(sizes = cfg.sizes + (key to ((x / 5).roundToInt() * 5)))) },
+                colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
+            )
+        }
+    }
+    if (cfg.sizes.isNotEmpty()) {
+        TextButton(onClick = { set(cfg.copy(sizes = emptyMap())) }) { Text("Ripristina tutto a 100%", color = c.accent) }
+    }
+}
+
+@Composable
 private fun LookStep(cfg: WidgetCfg, kind: WidgetKind, set: (WidgetCfg) -> Unit) {
     val c = LocalAppColors.current
     if (kind != WidgetKind.RADAR) {
@@ -335,11 +370,14 @@ private fun TapStep(cfg: WidgetCfg, kind: WidgetKind, set: (WidgetCfg) -> Unit) 
 @Composable
 fun WidgetsScreen() {
     val ctx = LocalContext.current
-    val list = remember { Widgets.all(ctx) }
+    val c = LocalAppColors.current
+    var version by remember { mutableIntStateOf(0) }
+    val list = remember(version) { Widgets.all(ctx).filter { !WidgetStore.isRemoved(ctx, it.first) } }
+    var confirm by remember { mutableStateOf<Int?>(null) }
     Page("Widget") {
         Hint("Per aggiungerne uno: tieni premuto sulla schermata Home → Widget → MLMeteo. Si apre la procedura guidata.")
         if (list.isEmpty()) {
-            CardBox { Text("Non hai ancora messo widget di MLMeteo.", color = LocalAppColors.current.inkDim, fontSize = 14.sp) }
+            CardBox { Text("Non hai widget di MLMeteo attivi.", color = c.inkDim, fontSize = 14.sp) }
         } else {
             SectionTitle("I tuoi widget")
             Group {
@@ -348,25 +386,48 @@ fun WidgetsScreen() {
                     val cfg = WidgetStore.cfg(ctx, wid)
                     val place = Widgets.placeFor(ctx, wid, cfg)
                     SettingRow(
-                        when (kind) { WidgetKind.WEATHER -> "MLMeteo"; WidgetKind.MINI -> "Mini"; WidgetKind.RADAR -> "Radar" },
+                        when (kind) { WidgetKind.WEATHER -> "MLMeteo"; WidgetKind.MINI -> "Mini"; WidgetKind.RADAR -> "Radar"; WidgetKind.RAIN -> "Pioggia" },
                         (if (cfg.place == "main") "Località principale" else place?.name ?: "—") + " · tocca per modificare",
-                        when (kind) { WidgetKind.WEATHER -> Icons.Filled.Widgets; WidgetKind.MINI -> Icons.Filled.Thermostat; WidgetKind.RADAR -> Icons.Filled.Radar },
+                        when (kind) { WidgetKind.WEATHER -> Icons.Filled.Widgets; WidgetKind.MINI -> Icons.Filled.Thermostat; WidgetKind.RADAR -> Icons.Filled.Radar; WidgetKind.RAIN -> Icons.Filled.WaterDrop },
                         onClick = {
                             ctx.startActivity(Intent(ctx, WidgetConfigActivity::class.java)
                                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, wid).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         },
-                        trailing = { com.marco.mltheme.MLChevron() },
+                        trailing = {
+                            IconButton(onClick = { confirm = wid }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Rimuovi", tint = c.inkDim)
+                            }
+                        },
                     )
                 }
             }
+            Hint("Android non permette alle app di togliere un widget dalla Home: \"Rimuovi\" lo ferma (non si aggiorna più) e poi lo togli tenendolo premuto. Così spariscono anche i widget fantasma che alcuni launcher lasciano registrati.")
         }
         SectionTitle("Tipi di widget")
         Group {
             SettingRow("MLMeteo", "Si adatta alla grandezza: meteo, dati extra, ore, pioggia e giorni", Icons.Filled.Widgets)
             Divider()
+            SettingRow("Pioggia", "Grafico di probabilità e millimetri nelle prossime ore", Icons.Filled.WaterDrop)
+            Divider()
             SettingRow("Mini", "1×1: solo icona e temperatura", Icons.Filled.Thermostat)
             Divider()
             SettingRow("Radar", "Mappa con il radar della Protezione Civile: più è grande, più zona mostra", Icons.Filled.Radar)
         }
+    }
+    confirm?.let { wid ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirm = null },
+            containerColor = c.card,
+            title = { Text("Rimuovere il widget?", color = c.ink) },
+            text = { Text("Smetterà di aggiornarsi e mostrerà \"Widget rimosso\". Poi tienilo premuto sulla Home per toglierlo.", color = c.inkDim) },
+            confirmButton = {
+                TextButton(onClick = {
+                    WidgetStore.markRemoved(ctx, wid)
+                    Widgets.update(ctx, AppWidgetManager.getInstance(ctx), wid, Widgets.kindOf(ctx, wid))
+                    confirm = null; version++
+                }) { Text("Rimuovi", color = c.accent) }
+            },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Annulla", color = c.inkDim) } },
+        )
     }
 }

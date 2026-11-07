@@ -187,7 +187,24 @@ private val darkMapFilter = ColorFilter.colorMatrix(
     )
 )
 
-fun baseLayer(dark: Boolean) = TileLayer(19, zoomBoost = 1, colorFilter = if (dark) darkMapFilter else null) { z, x, y ->
+/** Filtro che abbassa la luminosità della mappa ([b] da 0,3 a 1). */
+private fun dimFilter(dark: Boolean, b: Float): ColorFilter? {
+    if (b >= 0.99f) return if (dark) darkMapFilter else null
+    val m = if (dark) floatArrayOf(
+        -0.22f * b, -0.43f * b, -0.085f * b, 0f, 205f * b,
+        -0.22f * b, -0.43f * b, -0.085f * b, 0f, 207f * b,
+        -0.22f * b, -0.43f * b, -0.085f * b, 0f, 218f * b,
+        0f, 0f, 0f, 1f, 0f,
+    ) else floatArrayOf(
+        b, 0f, 0f, 0f, 0f,
+        0f, b, 0f, 0f, 0f,
+        0f, 0f, b, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f,
+    )
+    return ColorFilter.colorMatrix(ColorMatrix(m))
+}
+
+fun baseLayer(dark: Boolean, brightness: Float = 1f) = TileLayer(19, zoomBoost = 1, colorFilter = dimFilter(dark, brightness.coerceIn(0.3f, 1f))) { z, x, y ->
     "https://tile.openstreetmap.org/$z/$x/$y.png"
 }
 
