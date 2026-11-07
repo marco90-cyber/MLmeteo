@@ -630,7 +630,8 @@ fun RadarScreen() {
                             when {
                                 mode == RadarMode.DPC -> "Radar Protezione Civile + previsto 60 min"
                                 mode == RadarMode.RAINVIEWER -> "Radar RainViewer"
-                                model == "multi" -> "Pioggia Multimodello (media di 4 modelli, 6 ore)"
+                                model == "multi" -> "Media pesata di " + MultiMap.lastUsed.ifEmpty { listOf("4 modelli") }.joinToString(", ") +
+                                    (if (MultiMap.lastMissing.isNotEmpty()) " (manca ${MultiMap.lastMissing.joinToString(", ")})" else "")
                                 model == "wrf" -> "Previsione WRF (1,5 km)"
                                 model == "gfs" -> "Previsione GFS HD (0,25°)"
                                 model == "iconeu" -> "Previsione ICON-EU (6,5 km)"

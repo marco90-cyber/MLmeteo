@@ -1,6 +1,8 @@
 package com.marco.mlmeteo
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
@@ -22,37 +24,50 @@ object MultiMap {
     /** [stepH] = ore tra un passo e l'altro (ECMWF ogni 3 ore: il valore vale per le ore prima del passo). */
     private class Member(val weight: Double, val times: List<LocalDateTime>, val stepH: Long = 1, val sample: (Int, Double, Double) -> Float)
 
-    suspend fun load(progress: (Int, Int) -> Unit): GridData {
-        val loaded = ArrayList<Member>()
+    /** Modelli usati davvero nell'ultima media (quelli che hanno risposto). */
+    @Volatile var lastUsed: List<String> = emptyList()
+    @Volatile var lastMissing: List<String> = emptyList()
+
+    private fun nameOf(id: String) = when (id) { "icon2i" -> "ICON-2I"; "wrf" -> "WRF"; "ecmwf" -> "ECMWF"; else -> "ICON-EU" }
+
+    suspend fun load(progress: (Int, Int) -> Unit): GridData = kotlinx.coroutines.coroutineScope {
         val total = members.size
-        members.forEachIndexed { i, (id, w) ->
-            progress(i, total)
-            try {
-                val m = when (id) {
-                    "icon2i" -> Icon2i.load(MapLayer.RAIN, HOURS) { _, _ -> }.let { d ->
-                        Member(w, d.times) { k, lat, lon -> d.values.getOrNull(k)?.let { Icon2i.sample(it, lat, lon) } ?: Float.NaN }
+        var done = 0
+        progress(0, total)
+        // i 4 modelli si scaricano insieme
+        val results = members.map { (id, w) ->
+            async(Dispatchers.IO) {
+                val m = try {
+                    when (id) {
+                        "icon2i" -> Icon2i.load(MapLayer.RAIN, HOURS) { _, _ -> }.let { d ->
+                            Member(w, d.times) { k, lat, lon -> d.values.getOrNull(k)?.let { Icon2i.sample(it, lat, lon) } ?: Float.NaN }
+                        }
+                        "wrf" -> Wrf.load(MapLayer.RAIN, HOURS) { _, _ -> }.let { d ->
+                            Member(w, d.times) { k, lat, lon -> d.values.getOrNull(k)?.let { Wrf.sampleAt(it, lat, lon) } ?: Float.NaN }
+                        }
+                        "ecmwf" -> Ecmwf.load(MapLayer.RAIN, HOURS + 3) { _, _ -> }.let { d ->
+                            Member(w, d.times, 3) { k, lat, lon -> d.values.getOrNull(k)?.let { d.grid.sample(it, lat, lon) } ?: Float.NaN }
+                        }
+                        else -> IconEu.m.load(MapLayer.RAIN, HOURS) { _, _ -> }.let { d ->
+                            Member(w, d.times) { k, lat, lon -> d.values.getOrNull(k)?.let { d.grid.sample(it, lat, lon) } ?: Float.NaN }
+                        }
                     }
-                    "wrf" -> Wrf.load(MapLayer.RAIN, HOURS) { _, _ -> }.let { d ->
-                        Member(w, d.times) { k, lat, lon -> d.values.getOrNull(k)?.let { Wrf.sampleAt(it, lat, lon) } ?: Float.NaN }
-                    }
-                    "ecmwf" -> Ecmwf.load(MapLayer.RAIN, HOURS + 3) { _, _ -> }.let { d ->
-                        Member(w, d.times, 3) { k, lat, lon -> d.values.getOrNull(k)?.let { d.grid.sample(it, lat, lon) } ?: Float.NaN }
-                    }
-                    else -> IconEu.m.load(MapLayer.RAIN, HOURS) { _, _ -> }.let { d ->
-                        Member(w, d.times) { k, lat, lon -> d.values.getOrNull(k)?.let { d.grid.sample(it, lat, lon) } ?: Float.NaN }
-                    }
-                }
-                loaded += m
-            } catch (e: Exception) { }
-        }
-        progress(total, total)
+                } catch (e: Exception) { null }
+                synchronized(this@MultiMap) { done++ }
+                progress(done, total)
+                id to m
+            }
+        }.awaitAll()
+        val loaded = results.mapNotNull { it.second }
+        lastUsed = results.filter { it.second != null }.map { nameOf(it.first) }
+        lastMissing = results.filter { it.second == null }.map { nameOf(it.first) }
         if (loaded.isEmpty()) throw java.io.IOException("Nessun modello disponibile")
         val now = LocalDateTime.now().truncatedTo(ChronoUnit.HOURS)
-        val times = loaded.filter { it.stepH == 1L }.ifEmpty { loaded }.flatMap { it.times }.map { it.truncatedTo(ChronoUnit.HOURS) }.distinct().sorted()
-            .filter { !it.isBefore(now) && !it.isAfter(now.plusHours(HOURS.toLong())) }
-        if (times.isEmpty()) throw java.io.IOException("Dati non disponibili")
+        // ora per ora, da adesso alle prossime 6 ore
+        val times = (0..HOURS).map { now.plusHours(it.toLong()) }
         val values = withContext(Dispatchers.Default) {
             times.map { t ->
+                // per ogni punto: media pesata dei modelli che hanno un valore in quell'ora
                 val idx = loaded.map { m ->
                     if (m.stepH == 1L) m.times.indexOfFirst { it.truncatedTo(ChronoUnit.HOURS) == t }
                     // passo che contiene quest'ora (intensità media delle 3 ore prima del passo)
@@ -77,6 +92,9 @@ object MultiMap {
                 out
             }
         }
-        return GridData(now.toString(), times, grid, values)
+        val ok = times.indices.filter { k -> values[k].any { !it.isNaN() } }
+        if (ok.isEmpty()) throw java.io.IOException("Dati non disponibili")
+        val runId = java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHH"))
+        GridData(runId, ok.map { times[it] }, grid, ok.map { values[it] })
     }
 }
