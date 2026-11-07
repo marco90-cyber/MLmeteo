@@ -241,12 +241,12 @@ private fun ContentStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
 @Composable
 private fun ExtrasStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
     val c = LocalAppColors.current
-    Hint("Scegline fino a 4: compaiono come una riga di icone sotto la temperatura. Se il widget è stretto se ne vedono meno.")
+    Hint("Scegli quelli che vuoi: compaiono come pillole larghe quanto il testo, accanto al nome e alla temperatura. Ne entrano tanti quanti ci stanno; ingrandendoli o rimpicciolendoli (passo Grandezza) cambia anche quanti ne entrano.")
     Group {
         WidgetExtras.forEachIndexed { i, (key, label) ->
             if (i > 0) Divider()
             val on = key in cfg.extras
-            val full = cfg.extras.size >= 4 && !on
+            val full = false
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 56.dp)
                     .clickable(enabled = !full) { set(cfg.copy(extras = if (on) cfg.extras - key else cfg.extras + key)) }
@@ -265,7 +265,7 @@ private fun ExtrasStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
             }
         }
     }
-    Hint("Scelti: ${cfg.extras.size} di 4")
+    Hint("Scelti: ${cfg.extras.size}")
 }
 
 @Composable

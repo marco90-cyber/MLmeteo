@@ -464,7 +464,7 @@ object Widgets {
             if (hoursDp > 0) free -= hoursDp + 10f
         }
         var extrasRow = false
-        if (!sideExtras && ex.isNotEmpty() && free >= 38f * sEx) { extrasRow = true; free -= 38f * sEx }
+        if (!sideExtras && ex.isNotEmpty() && free >= 26f * sEx + 12f) { extrasRow = true; free -= 26f * sEx + 12f }
         var rainDp = 0f
         if (cfg.showRain && hrs24.isNotEmpty()) {
             val want = if (anyRain) 36f + 40f * sRain else 30f
@@ -481,8 +481,11 @@ object Widgets {
 
         // --- intestazione
         var y = pad + dp(16f) + gap / 2
+        val headerTop = y - dp(16f)
         val nameP = p.text(16f, c.ink, true)
-        cv.drawText(p.fit(nameP, place.name, w - pad * 2 - refreshSpace - dp(28f)), pad, y, nameP)
+        val nameTxt = p.fit(nameP, place.name, w - pad * 2 - refreshSpace - dp(28f))
+        cv.drawText(nameTxt, pad, y, nameP)
+        var headerEnd = pad + nameP.measureText(nameTxt)
         if (sideExtras) {
             y += dp(16f)
             val sub = listOfNotNull(
@@ -490,7 +493,9 @@ object Widgets {
                 "${fmt.temp(today?.tMax ?: Double.NaN)}/${fmt.temp(today?.tMin ?: Double.NaN)}",
                 if (cfg.showUpdated) updTxt.lowercase().replaceFirstChar { it } else null,
             ).joinToString(" · ")
-            cv.drawText(p.fit(p.text(12f, c.inkDim), sub, w - pad * 2 - refreshSpace), pad, y, p.text(12f, c.inkDim))
+            val subTxt = p.fit(p.text(12f, c.inkDim), sub, w - pad * 2 - refreshSpace)
+            cv.drawText(subTxt, pad, y, p.text(12f, c.inkDim))
+            headerEnd = maxOf(headerEnd, pad + p.text(12f, c.inkDim).measureText(subTxt))
         } else if (cfg.showUpdated) {
             y += dp(16f)
             cv.drawText(updTxt, pad, y, p.text(11f, c.inkDim))
@@ -505,23 +510,38 @@ object Widgets {
             val tx = tX + tp.measureText(fmt.temp(cur.temp)) + dp(14f)
             val availR = w - tx - pad
             if (sideExtras) {
-                // griglia 2×2 (o 1 colonna se lo spazio è poco)
-                var cols = if (ex.size >= 2 && availR / 2 >= dp(76f)) 2 else 1
-                if (availR < dp(70f)) cols = 0
-                if (cols > 0) {
-                    val rows = 2
-                    val n = (cols * rows).coerceAtMost(ex.size)
-                    val cw = availR / cols
-                    val ch = (ic - dp(6f)) / 2
-                    ex.take(n).forEachIndexed { i, (iv, v) ->
-                        val col = i % cols; val row = i / cols
-                        val x0 = tx + cw * col; val y0 = y + row * (ch + dp(6f))
-                        p.pill(x0 + dp(2f), y0, x0 + cw - dp(2f), y0 + ch, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
-                        val isz = (ch * 0.58f).coerceAtMost(dp(16f))
-                        drawVector(cv, iv, x0 + dp(9f), y0 + (ch - isz) / 2, isz, c.accent.toArgb())
-                        val tpe = p.text(12f * sEx, c.ink)
-                        cv.drawText(p.fit(tpe, v, cw - isz - dp(20f)), x0 + dp(13f) + isz, y0 + ch / 2 + dp(4.5f), tpe)
+                // pillole larghe quanto il testo, disposte a capo: usano lo spazio a destra del nome
+                // e della temperatura (sotto l'icona di aggiornamento)
+                val curTop = y; val curBottom = y + ic
+                val alertOn = cfg.showAlert && WidgetStore.alertLevel(ctx, place.id) > 0
+                val topRightEnd = w - pad - refreshSpace - (if (alertOn) dp(34f) else 0f)
+                val chH = dp(24f * sEx); val gapV = dp(5f); val gapH = dp(6f)
+                var rowTop = headerTop
+                var x = -1f
+                for ((iv, v) in ex) {
+                    val tpe = p.text(12f * sEx, c.ink)
+                    val isz = dp(14f * sEx)
+                    val cw = dp(8f) + isz + dp(5f) + tpe.measureText(v) + dp(10f)
+                    var placed = false
+                    while (!placed && rowTop + chH <= curBottom) {
+                        val rowBottom = rowTop + chH
+                        var left = 0f
+                        if (rowTop < curTop) left = maxOf(left, headerEnd + dp(12f))
+                        if (rowBottom > curTop) left = maxOf(left, tx)
+                        val right = if (rowTop < pad + dp(34f)) topRightEnd else w - pad
+                        if (x < left) x = left
+                        if (x + cw <= right) {
+                            p.pill(x, rowTop, x + cw, rowBottom, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
+                            drawVector(cv, iv, x + dp(8f), rowTop + (chH - isz) / 2, isz, c.accent.toArgb())
+                            cv.drawText(v, x + dp(13f) + isz, rowTop + chH / 2 + tpe.textSize * 0.35f, tpe)
+                            x += cw + gapH
+                            placed = true
+                        } else {
+                            rowTop += chH + gapV
+                            x = -1f
+                        }
                     }
+                    if (!placed) break
                 }
             } else if (availR > dp(70f)) {
                 cv.drawText(p.fit(p.text(14f, c.ink), conditionText(cur.code, cur.isDay), availR), tx, y + ic * 0.42f, p.text(14f, c.ink))
@@ -533,15 +553,19 @@ object Widgets {
 
         // --- dati extra in riga (widget stretti)
         fun extrasLine() {
-            val n = ((w - pad * 2) / dp(74f * sEx)).toInt().coerceIn(1, ex.size)
-            val colW = (w - pad * 2) / n
-            ex.take(n).forEachIndexed { i, (iv, v) ->
-                val x0 = pad + colW * i
-                p.pill(x0 + dp(2f), y, x0 + colW - dp(2f), y + dp(28f * sEx), c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
-                drawVector(cv, iv, x0 + dp(10f * sEx), y + dp(6f * sEx), dp(16f * sEx), c.accent.toArgb())
-                cv.drawText(p.fit(p.text(12f * sEx, c.ink), v, colW - dp(36f * sEx)), x0 + dp(30f * sEx), y + dp(19f * sEx), p.text(12f * sEx, c.ink))
+            var x = pad
+            val chH = dp(26f * sEx)
+            for ((iv, v) in ex) {
+                val tpe = p.text(12f * sEx, c.ink)
+                val isz = dp(15f * sEx)
+                val cw = dp(9f) + isz + dp(5f) + tpe.measureText(v) + dp(11f)
+                if (x + cw > w - pad) break
+                p.pill(x, y, x + cw, y + chH, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
+                drawVector(cv, iv, x + dp(9f), y + (chH - isz) / 2, isz, c.accent.toArgb())
+                cv.drawText(v, x + dp(14f) + isz, y + chH / 2 + tpe.textSize * 0.35f, tpe)
+                x += cw + dp(6f)
             }
-            y += dp(28f * sEx) + dp(10f) + gap
+            y += chH + dp(12f) + gap
         }
         if (extrasRow) extrasLine()
         closeZone("main", y - gap / 2)
@@ -649,7 +673,7 @@ object Widgets {
         val fmt = Fmt(Prefs.loadSettings(ctx))
         val cur = f.current
         val today = f.days.firstOrNull()
-        return cfg.extras.take(4).mapNotNull { e ->
+        return cfg.extras.mapNotNull { e ->
             when (e) {
                 "wind" -> Icons.Filled.Air to fmt.wind(cur.windSpeed)
                 "humidity" -> Icons.Filled.WaterDrop to (if (cur.humidity.ok()) "${cur.humidity.roundToInt()}%" else "—")
