@@ -807,7 +807,7 @@ fun RadarScreen() {
                         mode == RadarMode.DPC -> "Radar: Dipartimento della Protezione Civile"
                         mode == RadarMode.RAINVIEWER -> "Rain Viewer"
                         model == "wrf" -> "WRF: ItaliaMeteo"
-                        model == "multi" -> "Multimodello: ItaliaMeteo / ARPAE, Deutscher Wetterdienst"
+                        model == "multi" -> "Multimodello: ItaliaMeteo / ARPAE, Deutscher Wetterdienst, ECMWF (CC-BY 4.0)"
                         model == "gfs" -> "GFS: NOAA"
                         model == "iconeu" || model == "icond2" -> "ICON: Deutscher Wetterdienst"
                         model == "ecmwf" -> "ECMWF open data (CC-BY 4.0)"
