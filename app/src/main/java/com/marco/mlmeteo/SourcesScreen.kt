@@ -52,8 +52,7 @@ fun SourcesScreen() {
 
         val cons = compare?.filterKeys { it in Sources.consensusMembers }?.values?.filterNotNull()?.map { it.first }?.takeIf { it.isNotEmpty() }?.average()
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                .background(if (s.sourceId == "consensus") c.accentContainer.copy(alpha = 0.5f) else c.card)
+            Modifier.fillMaxWidth().uiCard(if (s.sourceId == "consensus") c.accentContainer.copy(alpha = 0.5f) else c.card)
                 .clickable { pick("consensus") }.padding(horizontal = 8.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

@@ -76,7 +76,7 @@ fun SectionTitle(text: String) {
 fun CardBox(modifier: Modifier = Modifier, padding: Int = 16, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAppColors.current
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card).padding(padding.dp),
+        modifier.fillMaxWidth().uiCard().padding(padding.dp),
         content = content,
     )
 }
@@ -89,7 +89,7 @@ private val LocalInGroup = androidx.compose.runtime.compositionLocalOf { false }
 fun Group(content: @Composable ColumnScope.() -> Unit) {
     val c = LocalAppColors.current
     androidx.compose.runtime.CompositionLocalProvider(LocalInGroup provides true) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.card), content = content)
+        Column(Modifier.fillMaxWidth().uiCard(group = true), content = content)
     }
 }
 

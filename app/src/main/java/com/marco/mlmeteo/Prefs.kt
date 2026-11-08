@@ -39,6 +39,8 @@ data class Settings(
     val icon2iHours: Int = 12,
     /** Animazioni della card principale: "once" (all'apertura), "always", "icons", "off". */
     val animations: String = "once",
+    /** Stile dell'interfaccia: "material", "fluent", "glass". */
+    val uiStyle: String = "material",
     val showLightning: Boolean = false,
     val useWallpaper: Boolean = true,
     val manualColor: Long = 0xFFA9A6FF,
@@ -110,6 +112,7 @@ object Prefs {
             icon2iHours = p.getInt("icon2iHours", d.icon2iHours),
             mapBrightness = p.getInt("mapBrightness", d.mapBrightness).coerceIn(30, 100),
             animations = p.getString("animations", d.animations) ?: d.animations,
+            uiStyle = p.getString("uiStyle", d.uiStyle) ?: d.uiStyle,
             showLightning = p.getBoolean("showLightning", d.showLightning),
             useWallpaper = p.getBoolean("useWallpaper", d.useWallpaper),
             manualColor = p.getLong("manualColor", d.manualColor),
@@ -157,6 +160,7 @@ object Prefs {
             .putInt("mapBrightness", s.mapBrightness)
             .putInt("icon2iHours", s.icon2iHours)
             .putString("animations", s.animations)
+            .putString("uiStyle", s.uiStyle)
             .putBoolean("showLightning", s.showLightning)
             .putBoolean("useWallpaper", s.useWallpaper)
             .putLong("manualColor", s.manualColor)

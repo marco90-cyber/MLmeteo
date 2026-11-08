@@ -163,6 +163,16 @@ fun AppearanceScreen() {
     val c = LocalAppColors.current
     val s = AppState.settings
     Page("Aspetto") {
+        SectionTitle("Stile")
+        Group {
+            ChoiceRow(
+                "Stile dell'interfaccia", null,
+                UiStyles.map { (id, name, desc) -> Choice(id, name, desc) },
+                s.uiStyle,
+            ) { v -> AppState.update { it.copy(uiStyle = v) } }
+        }
+        Hint("Fluent e Vetro scuro sono gli stili della versione per Windows: puoi usarli anche qui.")
+
         SectionTitle("Tema")
         Group {
             val canWall = Build.VERSION.SDK_INT >= 31

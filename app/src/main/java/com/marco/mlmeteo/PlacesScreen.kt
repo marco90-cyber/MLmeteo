@@ -143,8 +143,7 @@ private fun PlaceCard(p: Place, index: Int, main: Boolean, handle: Modifier? = n
     val fmt = Fmt(s)
     LaunchedEffect(p.id) { AppState.refreshIfOld(p) }
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(24.dp))
-            .background(if (main) c.accentContainer.copy(alpha = 0.45f) else c.card)
+        Modifier.fillMaxWidth().padding(bottom = 8.dp).uiCard(if (main) c.accentContainer.copy(alpha = 0.45f) else c.card)
             .clickable {
                 Nav.page = AppState.places.indexOfFirst { it.id == p.id }.coerceAtLeast(0)
                 Nav.back()

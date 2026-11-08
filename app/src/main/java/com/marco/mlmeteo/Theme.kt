@@ -9,6 +9,11 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
@@ -31,6 +36,55 @@ data class AppColors(
 )
 
 val LocalAppColors = staticCompositionLocalOf<AppColors> { error("AppColors non fornito") }
+
+/**
+ * Stile dell'interfaccia: Material You (Android), Fluent (Windows 11) o Vetro scuro
+ * (come la bozza per Windows: ardesia scura, schede compatte con bordo leggero).
+ */
+data class UiStyle(val id: String, val radius: androidx.compose.ui.unit.Dp, val groupRadius: androidx.compose.ui.unit.Dp, val border: Color?)
+
+val UiStyles = listOf(
+    Triple("material", "Material You", "Schede arrotondate, colori dallo sfondo"),
+    Triple("fluent", "Fluent", "Come Windows 11: angoli piccoli, bordo sottile, grigi neutri"),
+    Triple("glass", "Vetro scuro", "Ardesia scura con schede compatte, come la bozza per Windows"),
+)
+
+val LocalUiStyle = staticCompositionLocalOf { UiStyle("material", 24.dp, 28.dp, null) }
+
+/** Forma e fondo di una scheda secondo lo stile scelto. */
+@androidx.compose.runtime.Composable
+fun Modifier.uiCard(color: Color? = null, group: Boolean = false): Modifier {
+    val st = LocalUiStyle.current
+    val c = LocalAppColors.current
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(if (group) st.groupRadius else st.radius)
+    var m = this.clip(shape).background(color ?: c.card)
+    if (st.border != null) m = m.border(1.dp, st.border, shape)
+    return m
+}
+
+/** Applica lo stile ai colori. */
+fun styleColors(id: String, c: AppColors): AppColors = when (id) {
+    "fluent" -> if (c.dark) c.copy(
+        bg = Color(0xFF202020), card = Color(0xFF2B2B2B), card2 = Color(0xFF333333),
+        ink = Color(0xFFF3F3F3), inkDim = Color(0xFFC5C5C5), outline = Color(0xFF3D3D3D),
+    ) else c.copy(
+        bg = Color(0xFFF3F3F3), card = Color(0xFFFDFDFD), card2 = Color(0xFFF0F0F0),
+        ink = Color(0xFF1B1B1B), inkDim = Color(0xFF5F5F5F), outline = Color(0xFFE3E3E3),
+    )
+    "glass" -> c.copy(
+        dark = true,
+        bg = Color(0xFF1C2127), card = Color(0xFF262C34), card2 = Color(0xFF313842),
+        ink = Color(0xFFF2F4F7), inkDim = Color(0xFFA9B3BE), outline = Color(0xFF3B434D),
+        accentContainer = lerp(Color(0xFF313842), c.accent, 0.35f), onAccentContainer = Color(0xFFF2F4F7),
+    )
+    else -> c
+}
+
+fun uiStyleOf(id: String) = when (id) {
+    "fluent" -> UiStyle("fluent", 8.dp, 8.dp, null)
+    "glass" -> UiStyle("glass", 14.dp, 16.dp, Color.White.copy(alpha = 0.06f))
+    else -> UiStyle("material", 24.dp, 28.dp, null)
+}
 
 val SixColors = listOf(
     0xFFA9A6FF to "Lavanda",
@@ -80,7 +134,7 @@ fun themeAccent(s: Settings, dark: Boolean): Color {
 }
 
 @Composable
-fun isDarkMode(s: Settings): Boolean = when (s.mode) {
+fun isDarkMode(s: Settings): Boolean = if (s.uiStyle == "glass") true else when (s.mode) {
     "light" -> false
     "dark", "amoled" -> true
     else -> isSystemInDarkTheme()
@@ -90,8 +144,10 @@ fun isDarkMode(s: Settings): Boolean = when (s.mode) {
 fun MLTheme(s: Settings, tint: Color?, content: @Composable () -> Unit) {
     val dark = isDarkMode(s)
     val accent = themeAccent(s, true)
-    val c = buildColors(dark, s.mode == "amoled", accent, if (s.weatherTint) tint else null)
-    val scheme = if (dark) {
+    val c0 = buildColors(dark, s.mode == "amoled", accent, if (s.weatherTint) tint else null)
+    val c = styleColors(s.uiStyle, c0)
+    val st = uiStyleOf(s.uiStyle).let { if (it.id == "fluent") it.copy(border = c.outline) else it }
+    val scheme = if (c.dark) {
         darkColorScheme(
             primary = c.accent, onPrimary = Color(0xFF16151C),
             primaryContainer = c.accentContainer, onPrimaryContainer = c.onAccentContainer,
@@ -113,7 +169,7 @@ fun MLTheme(s: Settings, tint: Color?, content: @Composable () -> Unit) {
         )
     }
     val switchStyle = com.marco.mltheme.MLThemeSettings.get(LocalContext.current).switchStyle
-    CompositionLocalProvider(LocalAppColors provides c, com.marco.mltheme.LocalSwitchStyle provides switchStyle) {
+    CompositionLocalProvider(LocalAppColors provides c, LocalUiStyle provides st, com.marco.mltheme.LocalSwitchStyle provides switchStyle) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }

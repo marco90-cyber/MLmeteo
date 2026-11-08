@@ -299,7 +299,7 @@ private fun MainCard(f: Forecast, fmt: Fmt, err: String?) {
         androidx.compose.ui.geometry.Offset(0f, 1.5f), 10f,
     )
     Box(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card)
+        Modifier.fillMaxWidth().uiCard()
             .clickable(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null,
@@ -398,7 +398,7 @@ private fun ForecastPill(label: String, code: Int, isDay: Boolean, temp: String,
 private fun HoursCard(f: Forecast, fmt: Fmt) {
     val c = LocalAppColors.current
     val t = iconClock()
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card).padding(vertical = 16.dp)) {
+    Column(Modifier.fillMaxWidth().uiCard().padding(vertical = 16.dp)) {
         Box(Modifier.padding(start = 18.dp, bottom = 10.dp)) { CardTitle("Prossime ore") }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -464,7 +464,7 @@ private fun DaysCard(f: Forecast, fmt: Fmt, count: Int) {
     if (days.isEmpty()) return
     val today = f.localNow.toLocalDate()
     val t = iconClock()
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card).padding(vertical = 16.dp)) {
+    Column(Modifier.fillMaxWidth().uiCard().padding(vertical = 16.dp)) {
         Box(Modifier.padding(start = 18.dp, bottom = 10.dp)) { CardTitle("Prossimi ${days.size} giorni") }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -483,7 +483,7 @@ private fun DaysCard(f: Forecast, fmt: Fmt, count: Int) {
 private fun RadarPreviewCard(place: Place) {
     val c = LocalAppColors.current
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(c.card).clickable { Nav.go(Screen.RADAR) },
+        Modifier.fillMaxWidth().uiCard().clickable { Nav.go(Screen.RADAR) },
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Map, contentDescription = null, tint = c.accent)
@@ -504,7 +504,7 @@ private fun RadarPreviewCard(place: Place) {
 private fun Small(title: String, content: @Composable () -> Unit) {
     val c = LocalAppColors.current
     Column(
-        Modifier.fillMaxWidth().height(152.dp).clip(RoundedCornerShape(24.dp)).background(c.card).padding(16.dp),
+        Modifier.fillMaxWidth().height(152.dp).uiCard().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(title, color = c.inkDim, fontSize = 13.sp)
