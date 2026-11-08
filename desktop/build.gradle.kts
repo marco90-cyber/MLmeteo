@@ -19,7 +19,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
     implementation("org.json:json:20240303")
     implementation("org.apache.commons:commons-compress:1.27.1")
+    testImplementation(kotlin("test"))
+    @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+    testImplementation(compose.uiTest)
+    testImplementation(compose.desktop.uiTestJUnit4)
 }
+
+tasks.withType<Test> { testLogging { showStandardStreams = true } }
 
 val build = (System.getenv("VERSION_CODE") ?: "1").toInt()
 
