@@ -107,23 +107,29 @@ jobs:
         with:
           gradle-version: 8.10.2
 
-      - name: Compila l'installer per Windows (MSI)
+      - name: Compila l'app per Windows (versione portatile)
         shell: bash
         run: |
           set +e
-          # WiX a volte non si scarica al primo colpo (errore 504 di GitHub): fino a 3 tentativi
-          for i in 1 2 3; do
-            gradle :desktop:packageMsi --no-daemon --console=plain --stacktrace > build.log 2>&1
-            code=$?
-            if [ $code -eq 0 ] || ! grep -q "downloadWix" build.log; then break; fi
-            echo "WiX non scaricato, nuovo tentativo $i"; sleep 20
-          done
+          gradle :desktop:createDistributable --no-daemon --console=plain --stacktrace > build.log 2>&1
+          code=$?
           if [ $code -ne 0 ]; then
             grep -E '^e: ' build.log | sed 's#file:///[^ ]*/desktop/#desktop/#; s#file:///[^ ]*/shared/#shared/#' | head -12 | while IFS= read -r l; do echo "::error::$l"; done
             echo "::error::$(grep -A10 'What went wrong' build.log | head -14 | tr '\n' '|')"
-            echo "::error::$(tail -n 30 build.log | tr '\n' '|' | cut -c1-3500)"
           fi
           exit $code
+
+      - name: Compila l'installer (MSI)
+        shell: bash
+        continue-on-error: true
+        run: |
+          # WiX si scarica da GitHub e a volte non risponde (504): fino a 3 tentativi, poi resta la versione portatile
+          for i in 1 2 3; do
+            gradle :desktop:packageMsi --no-daemon --console=plain > msi.log 2>&1 && exit 0
+            grep -q "downloadWix" msi.log || { tail -20 msi.log; exit 1; }
+            echo "WiX non scaricato, nuovo tentativo $i"; sleep 30
+          done
+          exit 1
 
       - name: Controllo automatico (cerca e aggiunge località, controlla memoria e ridisegni)
         shell: bash
@@ -134,10 +140,14 @@ jobs:
           echo "Località massime durante il test: $MAXN"
           if [ -z "$MAXN" ] || [ "$MAXN" -gt 3 ]; then echo "::error::Controllo automatico fallito (località: $MAXN)"; exit 1; fi
 
-      - name: Aggiungi l'installer alla release
-        shell: bash
+      - name: Aggiungi Windows alla release
+        shell: pwsh
         run: |
-          TAG="v1.0.${{ github.run_number }}"
-          MSI=$(ls desktop/build/compose/binaries/main/msi/*.msi | head -1)
-          cp "$MSI" "MLMeteo-Windows-$TAG.msi"
-          gh release upload "$TAG" "MLMeteo-Windows-$TAG.msi" --clobber
+          $tag = "v1.0.${{ github.run_number }}"
+          Compress-Archive -Path desktop/build/compose/binaries/main/app/MLMeteo -DestinationPath "MLMeteo-Windows-$tag-portatile.zip"
+          gh release upload $tag "MLMeteo-Windows-$tag-portatile.zip" --clobber
+          $msi = Get-ChildItem desktop/build/compose/binaries/main/msi/*.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($msi) {
+            Copy-Item $msi.FullName "MLMeteo-Windows-$tag.msi"
+            gh release upload $tag "MLMeteo-Windows-$tag.msi" --clobber
+          }
