@@ -51,6 +51,7 @@ object AppState {
         if (inited) return
         inited = true
         app = ctx.applicationContext
+        AppLog.init(app)
         Icon2i.cacheDir = app.cacheDir
         Wrf.cacheDir = app.cacheDir
         Gfs.cacheDir = app.cacheDir
@@ -128,19 +129,22 @@ object AppState {
         val source = Sources.byId(settings.sourceId)
         scope.launch {
             try {
+                val t0 = System.currentTimeMillis()
                 val f = WeatherRepo.forecast(p, source)
+                AppLog.i("Previsione ${p.name} (${source.id}) in ${System.currentTimeMillis() - t0} ms")
                 forecasts[p.id] = f
                 errors.remove(p.id)
                 ForecastStore.save(app, p.id, f)
                 Widgets.updateAll(app)
                 if (p.id == mainPlace()?.id) Notify.statusBar(app, p, f)
             } catch (e: Exception) {
+                AppLog.e("Previsione ${p.name} non riuscita", e)
                 errors[p.id] = e.message ?: "Errore di rete"
             } finally {
                 loading[p.id] = false
             }
             WeatherRepo.airQuality(p)?.let { air[p.id] = it; WidgetStore.saveAir(app, p.id, it.aqi) }
-            try { alerts[p.id] = AlertsRepo.forPlace(p).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { }
+            try { alerts[p.id] = AlertsRepo.forPlace(p).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { AppLog.w("Allerte ${p.name}: ${e.message}") }
             Widgets.updateAll(app)
         }
     }

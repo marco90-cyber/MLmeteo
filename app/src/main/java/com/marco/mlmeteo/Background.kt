@@ -88,6 +88,8 @@ object Background {
 class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val ctx = applicationContext
+        AppLog.init(ctx)
+        AppLog.d("Aggiornamento in background")
         val s = Prefs.loadSettings(ctx)
         // posizione aggiornata anche ad app chiusa (serve il permesso "Consenti sempre")
         if (s.useGps && Locator.hasBackground(ctx)) try { Locator.update(ctx) } catch (e: Exception) { }
@@ -104,14 +106,14 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 val f = WeatherRepo.forecast(p, source)
                 ForecastStore.save(ctx, p.id, f)
                 if (p.id == main.id) Notify.statusBar(ctx, p, f, s)
-            } catch (e: Exception) { }
+            } catch (e: Exception) { AppLog.e("Background: previsione ${p.name} non riuscita", e) }
         }
         // allerte e qualità dell'aria per i widget, radar per il widget radar
         for (p in places.filter { it.id in wanted }) {
             try { WidgetStore.saveAlertLevel(ctx, p.id, AlertsRepo.forPlace(p)) } catch (e: Exception) { }
             try { WeatherRepo.airQuality(p)?.let { WidgetStore.saveAir(ctx, p.id, it.aqi) } } catch (e: Exception) { }
         }
-        try { RadarWidgetData.prepare(ctx) } catch (e: Exception) { }
+        try { RadarWidgetData.prepare(ctx) } catch (e: Exception) { AppLog.w("Widget radar: ${e.message}") }
         Widgets.refreshDone(ctx)
         Widgets.updateAll(ctx)
         if (s.notifAlerts) try { Notify.alerts(ctx, main, AlertsRepo.forPlace(main, force = true), s) } catch (e: Exception) { }
@@ -126,6 +128,8 @@ class MorningWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val ctx = applicationContext
         val s = Prefs.loadSettings(ctx)
         val slot = inputData.getString("slot") ?: "morning"
+        AppLog.init(ctx)
+        AppLog.d("Notifica del giorno: $slot")
         try {
             val places = (listOfNotNull(Prefs.loadGps(ctx).takeIf { s.useGps }) + Prefs.loadPlaces(ctx))
             val main = places.firstOrNull { it.id == s.mainPlaceId } ?: places.firstOrNull()

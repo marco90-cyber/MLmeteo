@@ -21,6 +21,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
@@ -573,6 +578,8 @@ fun InfoScreen() {
             Divider()
             SettingRow("Codice sorgente", "github.com/marco90-cyber/MLmeteo", Icons.Filled.Policy, onClick = { open("https://github.com/marco90-cyber/MLmeteo") })
         }
+        SectionTitle("Registro (log)")
+        LogGroup()
         SectionTitle("Crediti dati")
         CardBox {
             Text(
@@ -625,5 +632,59 @@ fun BackgroundLocationRow() {
         },
     ) {
         com.marco.mltheme.MLSwitch(checked = granted, onCheckedChange = null)
+    }
+}
+
+
+/** Registro dei log: mostra, copia, condividi (per mandare gli errori allo sviluppatore). */
+@Composable
+private fun LogGroup() {
+    val ctx = LocalContext.current
+    val c = LocalAppColors.current
+    var show by remember { mutableStateOf(false) }
+    var verbose by remember { mutableStateOf(AppLog.verbose) }
+    var text by remember { mutableStateOf("") }
+    fun share() = try {
+        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Registro MLMeteo")
+            putExtra(Intent.EXTRA_TEXT, AppLog.tail(400))
+        }, "Condividi il registro"))
+    } catch (e: Exception) { }
+    Group {
+        SettingRow("Mostra registro", "Ultimi eventi: avvio, aggiornamenti, errori", Icons.Filled.Description,
+            onClick = { text = AppLog.tail(300); show = true })
+        Divider()
+        SettingRow("Condividi registro", "Per mandarlo su Telegram o per email", Icons.Filled.Share, onClick = { share() })
+        Divider()
+        SwitchRow("Log dettagliato", "Registra anche gli aggiornamenti in background", Icons.Filled.BugReport, checked = verbose) {
+            verbose = it; AppLog.setVerbose(ctx, it)
+        }
+    }
+    if (show) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { show = false },
+            containerColor = c.card,
+            title = { Text("Registro", color = c.ink) },
+            text = {
+                Box(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    Text(text.ifBlank { "Registro vuoto" }, color = c.ink, fontSize = 11.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, lineHeight = 14.sp)
+                }
+            },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = {
+                        val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("Registro MLMeteo", text))
+                    }) { Text("Copia") }
+                    TextButton(onClick = { share() }) { Text("Condividi") }
+                    TextButton(onClick = { show = false }) { Text("Chiudi") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { AppLog.clear(); text = AppLog.tail(300) }) { Text("Svuota") }
+            },
+        )
     }
 }

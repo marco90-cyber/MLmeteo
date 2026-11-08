@@ -285,6 +285,7 @@ private fun PlacePage(place: Place) {
 // ------------------------------------------------------------------ card principali
 
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun MainCard(f: Forecast, fmt: Fmt, err: String?) {
     val c = LocalAppColors.current
     val cur = f.current
@@ -315,7 +316,7 @@ private fun MainCard(f: Forecast, fmt: Fmt, err: String?) {
         Column(Modifier.padding(22.dp)) {
             val updated = java.time.Instant.ofEpochMilli(f.fetchedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
             Text(
-                "Aggiornato alle ${fmt.time(updated)}" + if (err != null) " · offline" else "",
+                "${f.sourceName} · aggiornato alle ${fmt.time(updated)}" + if (err != null) " · offline" else "",
                 color = c.inkDim, fontSize = 13.sp, style = androidx.compose.ui.text.TextStyle(shadow = shadow),
             )
             Spacer(Modifier.height(10.dp))
@@ -329,11 +330,28 @@ private fun MainCard(f: Forecast, fmt: Fmt, err: String?) {
                         style = androidx.compose.ui.text.TextStyle(shadow = shadow))
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "Max ${fmt.temp(today?.tMax ?: Double.NaN)} · Min ${fmt.temp(today?.tMin ?: Double.NaN)} · Percepita ${fmt.temp(cur.feels)}",
-                color = c.ink, fontSize = 16.sp, style = androidx.compose.ui.text.TextStyle(shadow = shadow),
-            )
+            Spacer(Modifier.height(14.dp))
+            // riepilogo di oggi tutto insieme, in pillole
+            val chips = buildList {
+                add("Max ${fmt.temp(today?.tMax ?: Double.NaN)}")
+                add("Min ${fmt.temp(today?.tMin ?: Double.NaN)}")
+                add("Percepita ${fmt.temp(cur.feels)}")
+                val rain = today?.precipSum ?: Double.NaN
+                if (rain.ok() && rain >= 0.1) add("Pioggia ${fmt.rain(rain)}")
+                if (cur.windGusts.ok() && cur.windGusts >= 30) add("Raffiche ${fmt.wind(cur.windGusts)}")
+            }
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                chips.forEach { txt ->
+                    Text(
+                        txt, color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                        modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(c.card.copy(alpha = 0.55f))
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -398,18 +416,94 @@ private fun ForecastPill(label: String, code: Int, isDay: Boolean, temp: String,
 private fun HoursCard(f: Forecast, fmt: Fmt) {
     val c = LocalAppColors.current
     val t = iconClock()
+    var tab by remember { mutableStateOf("temp") }
+    val hrs = f.hours.take(24)
     Column(Modifier.fillMaxWidth().uiCard().padding(vertical = 16.dp)) {
-        Box(Modifier.padding(start = 18.dp, bottom = 10.dp)) { CardTitle("Prossime ore") }
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            CardTitle("Prossime ore")
+            Spacer(Modifier.weight(1f))
+            // riepilogo che cambia con la scheda
+            val head = when (tab) {
+                "wind" -> hrs.mapNotNull { h -> h.gust.takeIf { it.ok() } ?: h.wind.takeIf { it.ok() } }.maxOrNull()?.let { "Raffica max ${fmt.wind(it)}" } ?: ""
+                "rain" -> "Totale ${fmt.rain(hrs.sumOf { if (it.precip.ok()) it.precip else 0.0 })}"
+                else -> f.days.firstOrNull()?.let { "Max oggi ${fmt.temp(it.tMax)}" } ?: ""
+            }
+            Text(head, color = c.inkDim, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        }
+        // schede Temperatura / Vento / Pioggia
+        Row(Modifier.padding(start = 16.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("temp" to "Temperatura", "wind" to "Vento", "rain" to "Pioggia").forEach { (k, label) ->
+                val sel = k == tab
+                Text(
+                    label, color = if (sel) c.onAccentContainer else c.inkDim, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (sel) c.accentContainer else c.card2)
+                        .clickable { tab = k }.padding(horizontal = 14.dp, vertical = 6.dp),
+                )
+            }
+        }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
         ) {
-            itemsIndexed(f.hours.take(24)) { i, h ->
+            itemsIndexed(hrs) { i, h ->
                 val first = i == 0
-                ForecastPill(if (first) "Ora" else fmt.hourLabel(h.time), h.code, h.isDay,
-                    fmt.temp(if (first) f.current.temp else h.temp), h.precipProb, h.precip, first, t, fmt)
+                val label = if (first) "Ora" else fmt.hourLabel(h.time)
+                when (tab) {
+                    "wind" -> WindPill(label, h, first, t + i, fmt)
+                    "rain" -> RainPill(label, h, first, fmt)
+                    else -> ForecastPill(label, h.code, h.isDay, fmt.temp(if (first) f.current.temp else h.temp), h.precipProb, h.precip, first, t, fmt)
+                }
             }
         }
+    }
+}
+
+/** Pillola del vento: freccia della direzione (verso dove soffia), velocità e raffiche. */
+@Composable
+private fun WindPill(label: String, h: Hour, first: Boolean, t: Float, fmt: Fmt) {
+    val c = LocalAppColors.current
+    val ink = if (first) c.onAccentContainer else c.ink
+    Column(
+        Modifier.width(62.dp).clip(RoundedCornerShape(31.dp))
+            .background(if (first) c.accentContainer else c.card2).padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(label, color = if (first) ink else c.inkDim, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+            if (h.windDir.ok()) Canvas(Modifier.size(24.dp).rotate((h.windDir + 180).toFloat() + kotlin.math.sin(t * 2) * 3f)) {
+                val p = Path().apply {
+                    moveTo(size.width / 2, 0f); lineTo(size.width * 0.9f, size.height); lineTo(size.width / 2, size.height * 0.72f)
+                    lineTo(size.width * 0.1f, size.height); close()
+                }
+                drawPath(p, Color(0xFFEF9F27))
+            }
+        }
+        Text(if (h.wind.ok()) fmt.windParts(h.wind).first else "—", color = ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(if (h.windDir.ok()) "da ${windDirText(h.windDir)}" else " ", color = if (first) ink else c.inkDim, fontSize = 11.sp, maxLines = 1)
+        Text(if (h.gust.ok()) "raff. ${fmt.windParts(h.gust).first}" else " ", color = if (first) ink else c.inkDim, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+/** Pillola della pioggia: probabilità, colonnina che si riempie e millimetri. */
+@Composable
+private fun RainPill(label: String, h: Hour, first: Boolean, fmt: Fmt) {
+    val c = LocalAppColors.current
+    val ink = if (first) c.onAccentContainer else c.ink
+    val mm = if (h.precip.ok()) h.precip else 0.0
+    val fill by androidx.compose.animation.core.animateFloatAsState((mm / 5.0).toFloat().coerceIn(0f, 1f), androidx.compose.animation.core.tween(700), label = "mm")
+    Column(
+        Modifier.width(62.dp).clip(RoundedCornerShape(31.dp))
+            .background(if (first) c.accentContainer else c.card2).padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(label, color = if (first) ink else c.inkDim, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(if (h.precipProb.ok()) "${h.precipProb.roundToInt()}%" else "—", color = if (first) ink else c.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.width(12.dp).height(38.dp).clip(RoundedCornerShape(6.dp)).background(c.outline), contentAlignment = Alignment.BottomCenter) {
+            Box(Modifier.fillMaxWidth().height((38 * fill).dp).background(Color(0xFF1E88E5)))
+        }
+        Text(fmt.rain(mm), color = RainBlue, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
