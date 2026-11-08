@@ -28,7 +28,7 @@ class LoopTest {
         onNode(hasSetTextAction()).performTextInput("Palermo")
         val t0 = System.currentTimeMillis()
         var last = 0
-        try { waitUntil(15000) { onAllNodes(androidx.compose.ui.test.hasText("Aggiungi")).fetchSemanticsNodes().isNotEmpty() } } catch (e: Throwable) { println("PROBE no results ${e}") }
+        try { waitUntil(timeoutMillis = 15000) { onAllNodes(androidx.compose.ui.test.hasText("Aggiungi")).fetchSemanticsNodes().isNotEmpty() } } catch (e: Throwable) { println("PROBE no results ${e}") }
         repeat(12) {
             Thread.sleep(400)
             mainClock.advanceTimeBy(400)
