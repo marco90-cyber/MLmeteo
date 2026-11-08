@@ -107,6 +107,19 @@ jobs:
         with:
           gradle-version: 8.10.2
 
+      - name: Prepara WiX (da NuGet, GitHub a volte risponde 504)
+        shell: bash
+        run: |
+          mkdir -p build/wix311
+          for i in 1 2 3; do
+            curl -sSL --fail -o wix.nupkg https://www.nuget.org/api/v2/package/wix/3.11.2 && break
+            sleep 15
+          done
+          if [ -f wix.nupkg ]; then
+            mkdir -p wixpkg && unzip -q -o wix.nupkg -d wixpkg && cp -r wixpkg/tools/* build/wix311/
+          fi
+          ls build/wix311 | head -5
+
       - name: Compila l'app per Windows (versione portatile)
         shell: bash
         run: |
@@ -123,15 +136,6 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          # WiX da NuGet (GitHub a volte risponde 504), messo dove lo cerca Compose (build/wix311)
-          for i in 1 2 3; do
-            curl -sSL --fail -o wix.nupkg https://www.nuget.org/api/v2/package/wix/3.11.2 && break
-            sleep 15
-          done
-          mkdir -p wixpkg build/wix311
-          unzip -q -o wix.nupkg -d wixpkg
-          cp -r wixpkg/tools/* build/wix311/
-          ls build/wix311 | head
           gradle :desktop:packageMsi -x downloadWix -x unzipWix --no-daemon --console=plain > msi.log 2>&1 || { grep -A12 "What went wrong" msi.log; tail -20 msi.log; exit 1; }
 
       - name: Controllo automatico (cerca e aggiunge località, controlla memoria e ridisegni)
