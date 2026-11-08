@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.marco.mlmeteo.desktop.Desktop
 
 /**
  * Stato dell'app per Windows (stesso nome e stesse proprietà usate dal codice condiviso).
