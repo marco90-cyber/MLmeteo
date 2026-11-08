@@ -13,6 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import com.marco.mlmeteo.desktop.Desktop
+import com.marco.mlmeteo.desktop.Log
 
 /**
  * Stato dell'app per Windows (stesso nome e stesse proprietà usate dal codice condiviso).
@@ -38,7 +39,11 @@ object AppState {
     var loading by mutableStateOf(false)
     var selectedId by mutableStateOf("")
 
+    private var initDone = false
+
     fun init() {
+        if (initDone) return
+        initDone = true
         AlertsRepo.cacheDir = cache
         load()
         if (selectedId.isBlank()) selectedId = mainPlace()?.id ?: ""
@@ -62,11 +67,14 @@ object AppState {
         scope.launch {
             loading = true
             try {
+                val t0 = System.currentTimeMillis()
                 forecasts[p.id] = WeatherRepo.forecast(p, Sources.byId(settings.sourceId))
                 errors.remove(p.id)
+                Log.d("Previsioni ${p.name} (${settings.sourceId}) in ${System.currentTimeMillis() - t0} ms")
                 saveForecastStamp()
             } catch (e: Exception) {
                 errors[p.id] = e.message ?: "Errore"
+                Log.e("Previsioni ${p.name} non riuscite", e)
             }
             loading = false
             try { WeatherRepo.airQuality(p)?.let { air[p.id] = it } } catch (e: Exception) { }
@@ -81,6 +89,7 @@ object AppState {
 
     fun addPlace(p: Place) {
         if (places.any { it.id == p.id }) return
+        Log.i("Aggiunta località ${p.name} (${p.id})")
         places.add(p)
         if (places.size == 1) settings = settings.copy(mainPlaceId = p.id)
         selectedId = p.id
@@ -162,12 +171,13 @@ object AppState {
             autostart = o.optBoolean("autostart", false)
             zoom = o.optInt("zoom", 100)
             selectedId = o.optString("selectedId", "")
+            places.clear()
             o.optJSONArray("places")?.let { a ->
                 for (i in 0 until a.length()) {
                     val p = a.getJSONObject(i)
-                    places.add(Place(p.getString("id"), p.getString("name"), p.optString("region"), p.getDouble("lat"), p.getDouble("lon"), cc = p.optString("cc")))
+                    if (places.none { it.id == p.getString("id") }) places.add(Place(p.getString("id"), p.getString("name"), p.optString("region"), p.getDouble("lat"), p.getDouble("lon"), cc = p.optString("cc")))
                 }
             }
-        } catch (e: Exception) { }
+        } catch (e: Exception) { Log.e("Impostazioni non leggibili", e) }
     }
 }

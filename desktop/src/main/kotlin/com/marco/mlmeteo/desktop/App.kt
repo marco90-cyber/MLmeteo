@@ -70,7 +70,6 @@ object Nav {
 fun App() {
     val c = LocalAppColors.current
     var expandedByUser by remember { mutableStateOf<Boolean?>(null) }
-    androidx.compose.runtime.SideEffect { Dbg.page++ }
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val w = maxWidth
         val narrow = w < 600.dp

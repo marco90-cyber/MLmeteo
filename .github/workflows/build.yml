@@ -120,6 +120,15 @@ jobs:
           fi
           exit $code
 
+      - name: Controllo automatico (cerca e aggiunge località, controlla memoria e ridisegni)
+        shell: bash
+        run: |
+          timeout 240 gradle :desktop:run --args="--selftest" --no-daemon --console=plain > selftest.log 2>&1 || true
+          grep SELFTEST selftest.log | sort -u | head -40
+          MAXN=$(grep -o 'n=[0-9]*' selftest.log | cut -d= -f2 | sort -n | tail -1)
+          echo "Località massime durante il test: $MAXN"
+          if [ -z "$MAXN" ] || [ "$MAXN" -gt 3 ]; then echo "::error::Controllo automatico fallito (località: $MAXN)"; exit 1; fi
+
       - name: Aggiungi l'installer alla release
         shell: bash
         run: |

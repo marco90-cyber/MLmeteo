@@ -58,15 +58,18 @@ object Desktop {
     fun onDataChanged() { changed++ }
 }
 
-fun main(args: Array<String>) = application {
+fun main(args: Array<String>) {
+    // una volta sola, prima della finestra (prima veniva ripetuto a ogni ridisegno e duplicava le località)
     AppState.init()
-    androidx.compose.runtime.SideEffect { Dbg.app++ }
+    Log.start()
+    Log.i("Località caricate: ${AppState.places.size}")
+    app(args)
+}
+
+private fun app(args: Array<String>) = application {
     if ("--selftest" in args) LaunchedEffect(Unit) {
         delay(4000); Nav.page = Page.PLACES; delay(1500); Dbg.query = "Palermo"
-        fun log(tag: String, i: Int) {
-            val rt = Runtime.getRuntime()
-            println("SELFTEST $tag t=$i app=${Dbg.app} win=${Dbg.win} page=${Dbg.page} places=${Dbg.places} rows=${Dbg.rows} changed=${Desktop.changed} n=${AppState.places.size} mem=${(rt.totalMemory() - rt.freeMemory()) / 1_000_000}MB")
-        }
+        fun log(tag: String, i: Int) = println("SELFTEST $tag t=$i n=${AppState.places.size} changed=${Desktop.changed} mem=${Log.memory()}")
         repeat(4) { delay(1000); log("cerca", it) }
         Dbg.lastResults.firstOrNull()?.let { AppState.addPlace(it) }
         repeat(8) { delay(1000); log("aggiunta", it) }
@@ -118,7 +121,7 @@ fun main(args: Array<String>) = application {
                 })
             }
             Separator()
-            Item("Esci", onClick = { WindowPrefs.save(win); exitApplication() })
+            Item("Esci", onClick = { WindowPrefs.save(win); Log.i("Uscita dal menu"); exitApplication() })
         },
     )
 
@@ -148,7 +151,6 @@ fun main(args: Array<String>) = application {
         },
         state = win, visible = visible, title = "MLMeteo", icon = winIcon,
     ) {
-        androidx.compose.runtime.SideEffect { Dbg.win++ }
         DesktopTheme(colors) { App() }
     }
 }
@@ -233,7 +235,16 @@ object WinSys {
         p.inputStream.bufferedReader().readText().also { p.waitFor() }
     } catch (e: Exception) { "" }
 
+    private var darkCached = false
+    private var darkAt = 0L
     fun darkMode(): Boolean {
+        if (System.currentTimeMillis() - darkAt < 60_000) return darkCached
+        darkAt = System.currentTimeMillis()
+        darkCached = darkModeNow()
+        return darkCached
+    }
+
+    private fun darkModeNow(): Boolean {
         val out = reg("query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "/v", "AppsUseLightTheme")
         return Regex("0x0\\b").containsMatchIn(out.substringAfter("AppsUseLightTheme", ""))
     }

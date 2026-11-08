@@ -67,13 +67,12 @@ import java.time.format.DateTimeFormatter
 
 // ------------------------------------------------------------------ Località
 
-object Dbg { var places = 0; var rows = 0; var app = 0; var win = 0; var page = 0
+object Dbg {
     var query by mutableStateOf("")
     var lastResults: List<Place> = emptyList() }
 
 @Composable
 fun PlacesPage() {
-    androidx.compose.runtime.SideEffect { Dbg.places++ }
     val c = LocalAppColors.current
     val s = AppState.settings
     val fmt = Fmt(s)
@@ -84,7 +83,8 @@ fun PlacesPage() {
         if (query.trim().length < 2) { results = emptyList(); return@LaunchedEffect }
         delay(350)
         searching = true
-        results = try { WeatherRepo.searchPlaces(query.trim()) } catch (e: Exception) { emptyList() }
+        results = try { WeatherRepo.searchPlaces(query.trim()).also { Log.d("Ricerca '${query.trim()}': ${it.size} risultati") } }
+            catch (e: Exception) { Log.e("Ricerca '${query.trim()}' non riuscita", e); emptyList() }
         Dbg.lastResults = results
         searching = false
     }
@@ -98,7 +98,6 @@ fun PlacesPage() {
             )
             if (searching) Text("Cerco…", color = c.inkDim, fontSize = 13.sp)
             results.forEach { p ->
-                androidx.compose.runtime.SideEffect { Dbg.rows++ }
                 Row(
                     Modifier.fillMaxWidth().uiCard().clickable { AppState.addPlace(p); query = "" }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -378,6 +377,31 @@ private fun InfoSettings() {
                 }
             })
         }
+    }
+    var showLog by remember { mutableStateOf(false) }
+    var verbose by remember { mutableStateOf(Log.verbose) }
+    SetRow("Registro (log)", "Memoria: ${Log.memory()} · ${Log.file.absolutePath}") {
+        Text(if (showLog) "Nascondi" else "Mostra", color = c.accent, fontSize = 14.sp, modifier = Modifier.clickable { showLog = !showLog })
+        Spacer(Modifier.width(16.dp))
+        Text("Apri cartella", color = c.accent, fontSize = 14.sp, modifier = Modifier.clickable {
+            try { java.awt.Desktop.getDesktop().open(Log.dir) } catch (e: Exception) { }
+        })
+        Spacer(Modifier.width(16.dp))
+        Text("Copia", color = c.accent, fontSize = 14.sp, modifier = Modifier.clickable {
+            try {
+                java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(Log.tail(500)), null)
+            } catch (e: Exception) { }
+        })
+    }
+    SetRow("Log dettagliato", "Registra anche ricerche e aggiornamenti (utile per segnalare un problema)") {
+        Toggle(verbose) { verbose = it; Log.verbose = it; Log.i("Log dettagliato: $it") }
+    }
+    if (showLog) {
+        Text(
+            Log.tail(200).ifBlank { "Il registro è vuoto." }, color = c.ink, fontSize = 11.sp,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            modifier = Modifier.fillMaxWidth().uiCard().padding(12.dp),
+        )
     }
     SetRow("Codice sorgente", "github.com/marco90-cyber/MLmeteo") {
         Text("Apri", color = c.accent, fontSize = 14.sp, modifier = Modifier.clickable { WinSys.open("https://github.com/marco90-cyber/MLmeteo") })
