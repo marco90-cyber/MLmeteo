@@ -111,7 +111,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          gradle :desktop:createDistributable --no-daemon --console=plain --stacktrace > build.log 2>&1
+          gradle :desktop:createDistributable -x downloadWix -x unzipWix --no-daemon --console=plain --stacktrace > build.log 2>&1
           code=$?
           if [ $code -ne 0 ]; then
             grep -E '^e: ' build.log | sed 's#file:///[^ ]*/desktop/#desktop/#; s#file:///[^ ]*/shared/#shared/#' | head -12 | while IFS= read -r l; do echo "::error::$l"; done
@@ -123,13 +123,16 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          # WiX si scarica da GitHub e a volte non risponde (504): fino a 3 tentativi, poi resta la versione portatile
+          # WiX da NuGet (GitHub a volte risponde 504), messo dove lo cerca Compose (build/wix311)
           for i in 1 2 3; do
-            gradle :desktop:packageMsi --no-daemon --console=plain > msi.log 2>&1 && exit 0
-            grep -q "downloadWix" msi.log || { tail -20 msi.log; exit 1; }
-            echo "WiX non scaricato, nuovo tentativo $i"; sleep 30
+            curl -sSL --fail -o wix.nupkg https://www.nuget.org/api/v2/package/wix/3.11.2 && break
+            sleep 15
           done
-          exit 1
+          mkdir -p wixpkg build/wix311
+          unzip -q -o wix.nupkg -d wixpkg
+          cp -r wixpkg/tools/* build/wix311/
+          ls build/wix311 | head
+          gradle :desktop:packageMsi -x downloadWix -x unzipWix --no-daemon --console=plain > msi.log 2>&1 || { grep -A12 "What went wrong" msi.log; tail -20 msi.log; exit 1; }
 
       - name: Controllo automatico (cerca e aggiunge località, controlla memoria e ridisegni)
         shell: bash
