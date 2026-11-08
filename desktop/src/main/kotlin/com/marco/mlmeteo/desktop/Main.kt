@@ -63,11 +63,17 @@ fun main(args: Array<String>) = application {
     androidx.compose.runtime.SideEffect { Dbg.app++ }
     if ("--selftest" in args) LaunchedEffect(Unit) {
         delay(4000); Nav.page = Page.PLACES; delay(1500); Dbg.query = "Palermo"
-        repeat(20) {
-            delay(1000)
+        fun log(tag: String, i: Int) {
             val rt = Runtime.getRuntime()
-            println("SELFTEST t=$it app=${Dbg.app} win=${Dbg.win} page=${Dbg.page} places=${Dbg.places} rows=${Dbg.rows} changed=${Desktop.changed} mem=${(rt.totalMemory() - rt.freeMemory()) / 1_000_000}MB")
+            println("SELFTEST $tag t=$i app=${Dbg.app} win=${Dbg.win} page=${Dbg.page} places=${Dbg.places} rows=${Dbg.rows} changed=${Desktop.changed} n=${AppState.places.size} mem=${(rt.totalMemory() - rt.freeMemory()) / 1_000_000}MB")
         }
+        repeat(4) { delay(1000); log("cerca", it) }
+        Dbg.lastResults.firstOrNull()?.let { AppState.addPlace(it) }
+        repeat(8) { delay(1000); log("aggiunta", it) }
+        Dbg.query = "Roma"
+        repeat(6) { delay(1000); log("cerca2", it) }
+        Nav.page = Page.METEO
+        repeat(8) { delay(1000); log("meteo", it) }
         exitApplication()
     }
     val tray = rememberTrayState()

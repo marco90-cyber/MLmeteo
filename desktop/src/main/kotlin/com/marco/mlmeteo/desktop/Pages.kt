@@ -68,7 +68,8 @@ import java.time.format.DateTimeFormatter
 // ------------------------------------------------------------------ Località
 
 object Dbg { var places = 0; var rows = 0; var app = 0; var win = 0; var page = 0
-    var query by mutableStateOf("") }
+    var query by mutableStateOf("")
+    var lastResults: List<Place> = emptyList() }
 
 @Composable
 fun PlacesPage() {
@@ -84,6 +85,7 @@ fun PlacesPage() {
         delay(350)
         searching = true
         results = try { WeatherRepo.searchPlaces(query.trim()) } catch (e: Exception) { emptyList() }
+        Dbg.lastResults = results
         searching = false
     }
     Column(Modifier.fillMaxSize()) {
