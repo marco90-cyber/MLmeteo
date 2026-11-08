@@ -10,4 +10,8 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: 8.10.2 }
-      - run: gradle :desktop:test --no-daemon --console=plain 2>&1 | grep -E "PROBE|e: |FAIL|Exception|error" | head -60
+      - name: Test
+        run: |
+          gradle :desktop:test --no-daemon --console=plain > t.log 2>&1 || true
+          grep -E "PROBE|^e: |FAIL|Exception" t.log | head -60
+          tail -40 t.log
