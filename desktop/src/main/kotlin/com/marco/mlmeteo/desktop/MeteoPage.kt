@@ -1,6 +1,19 @@
 package com.marco.mlmeteo.desktop
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -271,6 +284,7 @@ private fun Header(place: Place, f: Forecast, fmt: Fmt) {
 
 // ------------------------------------------------------------------ ore con le schede
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun HoursCard(f: Forecast, fmt: Fmt) {
     val c = LocalAppColors.current
@@ -288,7 +302,22 @@ private fun HoursCard(f: Forecast, fmt: Fmt) {
             }
             Text(head, color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        val hs = rememberScrollState()
+        val scope = rememberCoroutineScope()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+        ScrollArrow(true, hs.value > 0) { scope.launch { hs.animateScrollBy(-400f) } }
+        // rotellina del mouse (su e giù) e trascinamento: scorrono le ore in orizzontale
+        Row(
+            Modifier.weight(1f)
+                .onPointerEvent(PointerEventType.Scroll) { e ->
+                    val d = e.changes.first().scrollDelta
+                    scope.launch { hs.scrollBy((d.y + d.x) * 80f) }
+                    e.changes.forEach { it.consume() }
+                }
+                .draggable(rememberDraggableState { delta -> scope.launch { hs.scrollBy(-delta) } }, Orientation.Horizontal)
+                .horizontalScroll(hs),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             hrs.forEachIndexed { i, h ->
                 val first = i == 0
                 Column(
@@ -329,6 +358,18 @@ private fun HoursCard(f: Forecast, fmt: Fmt) {
                 }
             }
         }
+        ScrollArrow(false, hs.value < hs.maxValue) { scope.launch { hs.animateScrollBy(400f) } }
+        }
+        HorizontalScrollbar(rememberScrollbarAdapter(hs), Modifier.fillMaxWidth().padding(horizontal = 36.dp))
+    }
+}
+
+@Composable
+private fun ScrollArrow(left: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val c = LocalAppColors.current
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(32.dp)) {
+        Icon(if (left) Icons.Outlined.ChevronLeft else Icons.Outlined.ChevronRight, if (left) "Ore precedenti" else "Ore successive",
+            tint = if (enabled) c.ink else c.outline)
     }
 }
 

@@ -27,7 +27,7 @@ compose.desktop {
     application {
         mainClass = "com.marco.mlmeteo.desktop.MainKt"
         // memoria limitata: le animazioni creano oggetti temporanei, così Java li ripulisce presto
-        jvmArgs += listOf("-Xmx384m", "-XX:+UseSerialGC", "-XX:MaxHeapFreeRatio=30", "-XX:MinHeapFreeRatio=10")
+        jvmArgs += listOf("-Duser.language=it", "-Duser.country=IT", "-Xmx384m", "-XX:+UseSerialGC", "-XX:MaxHeapFreeRatio=30", "-XX:MinHeapFreeRatio=10")
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "MLMeteo"

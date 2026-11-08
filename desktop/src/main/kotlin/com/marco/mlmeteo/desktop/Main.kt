@@ -59,6 +59,8 @@ object Desktop {
 }
 
 fun main(args: Array<String>) {
+    // tutto in italiano, anche i testi di Java e Windows (date, menu, finestre di sistema)
+    java.util.Locale.setDefault(java.util.Locale.ITALY)
     // una volta sola, prima della finestra (prima veniva ripetuto a ogni ridisegno e duplicava le località)
     AppState.init()
     Log.start()
@@ -171,10 +173,19 @@ fun DesktopTheme(c: AppColors, content: @Composable () -> Unit) {
     val d = LocalDensity.current
     CompositionLocalProvider(
         LocalAppColors provides c, LocalUiStyle provides st,
+        androidx.compose.ui.platform.LocalLocalization provides ItalianLocalization,
         LocalDensity provides Density(d.density * AppState.zoom / 100f, d.fontScale),
     ) {
         MaterialTheme(colorScheme = scheme) { Box(Modifier.fillMaxSize()) { content() } }
     }
+}
+
+/** Testi del menu del tasto destro (copia, incolla…) in italiano. */
+object ItalianLocalization : androidx.compose.ui.platform.PlatformLocalization {
+    override val copy = "Copia"
+    override val cut = "Taglia"
+    override val paste = "Incolla"
+    override val selectAll = "Seleziona tutto"
 }
 
 /** Icona del meteo disegnata in un'immagine (finestra e barra delle applicazioni). */
