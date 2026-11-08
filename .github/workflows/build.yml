@@ -87,3 +87,43 @@ jobs:
           gh release list --limit 100 --json tagName --jq '.[5:][].tagName' | while IFS= read -r t; do
             gh release delete "$t" --cleanup-tag --yes
           done
+
+  windows:
+    needs: build
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+
+      - name: Compila l'installer per Windows (MSI)
+        shell: bash
+        run: |
+          set +e
+          gradle :desktop:packageMsi --no-daemon --console=plain --stacktrace > build.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            grep -E '^e: ' build.log | sed 's#file:///[^ ]*/desktop/#desktop/#; s#file:///[^ ]*/shared/#shared/#' | head -12 | while IFS= read -r l; do echo "::error::$l"; done
+            echo "::error::$(grep -A10 'What went wrong' build.log | head -14 | tr '\n' '|')"
+            echo "::error::$(tail -n 30 build.log | tr '\n' '|' | cut -c1-3500)"
+          fi
+          exit $code
+
+      - name: Aggiungi l'installer alla release
+        shell: bash
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          MSI=$(ls desktop/build/compose/binaries/main/msi/*.msi | head -1)
+          cp "$MSI" "MLMeteo-Windows-$TAG.msi"
+          gh release upload "$TAG" "MLMeteo-Windows-$TAG.msi" --clobber

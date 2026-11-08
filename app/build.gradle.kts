@@ -55,6 +55,12 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    // codice condiviso con la versione per Windows
+    sourceSets {
+        getByName("main") {
+            java.srcDirs("src/main/java", "../shared/src")
+        }
+    }
     buildFeatures {
         compose = true
     }

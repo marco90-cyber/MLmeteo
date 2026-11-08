@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "MLMeteo"
 include(":app")
+include(":desktop")
