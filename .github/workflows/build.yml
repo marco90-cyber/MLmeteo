@@ -111,8 +111,13 @@ jobs:
         shell: bash
         run: |
           set +e
-          gradle :desktop:packageMsi --no-daemon --console=plain --stacktrace > build.log 2>&1
-          code=$?
+          # WiX a volte non si scarica al primo colpo (errore 504 di GitHub): fino a 3 tentativi
+          for i in 1 2 3; do
+            gradle :desktop:packageMsi --no-daemon --console=plain --stacktrace > build.log 2>&1
+            code=$?
+            if [ $code -eq 0 ] || ! grep -q "downloadWix" build.log; then break; fi
+            echo "WiX non scaricato, nuovo tentativo $i"; sleep 20
+          done
           if [ $code -ne 0 ]; then
             grep -E '^e: ' build.log | sed 's#file:///[^ ]*/desktop/#desktop/#; s#file:///[^ ]*/shared/#shared/#' | head -12 | while IFS= read -r l; do echo "::error::$l"; done
             echo "::error::$(grep -A10 'What went wrong' build.log | head -14 | tr '\n' '|')"
