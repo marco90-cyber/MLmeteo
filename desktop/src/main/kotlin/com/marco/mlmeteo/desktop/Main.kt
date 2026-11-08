@@ -60,6 +60,16 @@ object Desktop {
 
 fun main(args: Array<String>) = application {
     AppState.init()
+    androidx.compose.runtime.SideEffect { Dbg.app++ }
+    if ("--selftest" in args) LaunchedEffect(Unit) {
+        delay(4000); Nav.page = Page.PLACES; delay(1500); Dbg.query = "Palermo"
+        repeat(20) {
+            delay(1000)
+            val rt = Runtime.getRuntime()
+            println("SELFTEST t=$it app=${Dbg.app} win=${Dbg.win} page=${Dbg.page} places=${Dbg.places} rows=${Dbg.rows} changed=${Desktop.changed} mem=${(rt.totalMemory() - rt.freeMemory()) / 1_000_000}MB")
+        }
+        exitApplication()
+    }
     val tray = rememberTrayState()
     // avviato con Windows: parte nascosto nell'area di notifica
     var visible by remember { mutableStateOf("--tray" !in args) }
@@ -132,6 +142,7 @@ fun main(args: Array<String>) = application {
         },
         state = win, visible = visible, title = "MLMeteo", icon = winIcon,
     ) {
+        androidx.compose.runtime.SideEffect { Dbg.win++ }
         DesktopTheme(colors) { App() }
     }
 }

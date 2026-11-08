@@ -67,7 +67,8 @@ import java.time.format.DateTimeFormatter
 
 // ------------------------------------------------------------------ Località
 
-object Dbg { var places = 0; var rows = 0 }
+object Dbg { var places = 0; var rows = 0; var app = 0; var win = 0; var page = 0
+    var query by mutableStateOf("") }
 
 @Composable
 fun PlacesPage() {
@@ -75,7 +76,7 @@ fun PlacesPage() {
     val c = LocalAppColors.current
     val s = AppState.settings
     val fmt = Fmt(s)
-    var query by remember { mutableStateOf("") }
+    var query by Dbg::query
     var results by remember { mutableStateOf<List<Place>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     LaunchedEffect(query) {
