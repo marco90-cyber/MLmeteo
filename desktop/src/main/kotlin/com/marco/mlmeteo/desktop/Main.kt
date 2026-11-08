@@ -46,6 +46,8 @@ import com.marco.mlmeteo.skyOf
 import com.marco.mlmeteo.styleColors
 import com.marco.mlmeteo.uiStyleOf
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.awt.Font
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
@@ -79,6 +81,23 @@ private fun app(args: Array<String>) = application {
         repeat(6) { delay(1000); log("cerca2", it) }
         Nav.page = Page.METEO
         repeat(8) { delay(1000); log("meteo", it) }
+        // radar: scarica e disegna ICON-2I e il Multimodello (deve funzionare senza eccezioni)
+        Nav.page = Page.RADAR
+        val radar = withContext(Dispatchers.IO) {
+            val r = StringBuilder()
+            try {
+                val d = com.marco.mlmeteo.Icon2i.load(com.marco.mlmeteo.MapLayer.RAIN, 2) { _, _ -> }
+                val img = com.marco.mlmeteo.Icon2i.renderStep(d, 0, com.marco.mlmeteo.MapLayer.RAIN)
+                r.append("icon2i=").append(img?.let { "${it.width}x${it.height}" } ?: "null")
+            } catch (e: Throwable) { r.append("icon2i=ERRORE ").append(e) }
+            try {
+                val g = com.marco.mlmeteo.MultiMap.load { _, _ -> }
+                r.append(" multi=ok")
+            } catch (e: Throwable) { r.append(" multi=ERRORE ").append(e) }
+            r.toString()
+        }
+        println("SELFTEST radar $radar")
+        repeat(3) { delay(1000); log("radar", it) }
         exitApplication()
     }
     val tray = rememberTrayState()

@@ -146,6 +146,7 @@ jobs:
           MAXN=$(grep -o 'n=[0-9]*' selftest.log | cut -d= -f2 | sort -n | tail -1)
           echo "Località massime durante il test: $MAXN"
           if [ -z "$MAXN" ] || [ "$MAXN" -gt 3 ]; then echo "::error::Controllo automatico fallito (località: $MAXN)"; exit 1; fi
+          if grep "SELFTEST radar" selftest.log | grep -q "ERRORE"; then echo "::error::Controllo automatico del radar fallito"; exit 1; fi
 
       - name: Aggiungi Windows alla release
         shell: pwsh

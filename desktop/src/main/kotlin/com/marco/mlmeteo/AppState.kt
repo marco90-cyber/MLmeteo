@@ -45,6 +45,13 @@ object AppState {
         if (initDone) return
         initDone = true
         AlertsRepo.cacheDir = cache
+        // cartella dei file scaricati per radar e mappe dei modelli
+        Icon2i.cacheDir = cache
+        Wrf.cacheDir = cache
+        Gfs.cacheDir = cache
+        IconEu.m.cacheDir = cache
+        IconD2.m.cacheDir = cache
+        Ecmwf.cacheDir = cache
         load()
         if (selectedId.isBlank()) selectedId = mainPlace()?.id ?: ""
     }
