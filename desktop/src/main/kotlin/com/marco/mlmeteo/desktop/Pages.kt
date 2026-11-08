@@ -67,8 +67,11 @@ import java.time.format.DateTimeFormatter
 
 // ------------------------------------------------------------------ Località
 
+object Dbg { var places = 0; var rows = 0 }
+
 @Composable
 fun PlacesPage() {
+    androidx.compose.runtime.SideEffect { Dbg.places++ }
     val c = LocalAppColors.current
     val s = AppState.settings
     val fmt = Fmt(s)
@@ -92,6 +95,7 @@ fun PlacesPage() {
             )
             if (searching) Text("Cerco…", color = c.inkDim, fontSize = 13.sp)
             results.forEach { p ->
+                androidx.compose.runtime.SideEffect { Dbg.rows++ }
                 Row(
                     Modifier.fillMaxWidth().uiCard().clickable { AppState.addPlace(p); query = "" }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,

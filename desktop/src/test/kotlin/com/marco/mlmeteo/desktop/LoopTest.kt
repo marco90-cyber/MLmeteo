@@ -28,12 +28,13 @@ class LoopTest {
         onNode(hasSetTextAction()).performTextInput("Palermo")
         val t0 = System.currentTimeMillis()
         var last = 0
-        repeat(16) {
-            Thread.sleep(500)
-            mainClock.advanceTimeBy(500)
-            val now = Probe.comp
-            println("PROBE t=${System.currentTimeMillis() - t0}ms comp=${now - before} (+${now - last}) mem=${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1_000_000}MB")
-            last = now
+        try { waitUntil(15000) { onAllNodes(androidx.compose.ui.test.hasText("Aggiungi")).fetchSemanticsNodes().isNotEmpty() } } catch (e: Throwable) { println("PROBE no results ${e}") }
+        repeat(12) {
+            Thread.sleep(400)
+            mainClock.advanceTimeBy(400)
+            val n = onAllNodes(androidx.compose.ui.test.hasText("Aggiungi")).fetchSemanticsNodes().size
+            println("PROBE t=${System.currentTimeMillis() - t0}ms root=${Probe.comp - before} places=${Dbg.places} rows=${Dbg.rows} nodes=$n changed=${Desktop.changed} mem=${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1_000_000}MB")
+            last = Probe.comp
         }
     }
 }
