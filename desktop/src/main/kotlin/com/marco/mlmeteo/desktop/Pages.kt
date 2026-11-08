@@ -176,21 +176,8 @@ fun AlertsPage() {
 
 @Composable
 fun RadarPage() {
-    val c = LocalAppColors.current
-    Column(Modifier.fillMaxSize()) {
-        PageHeader("Radar")
-        ScrollPage {
-            Card(Modifier.fillMaxWidth()) {
-                Text("Radar e mappe in arrivo", color = c.ink, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    "Il radar della Protezione Civile, il nowcast, i fulmini e le mappe dei modelli (ICON-2I, WRF, ICON-EU, ECMWF, GFS, Multimodello) arrivano con il prossimo aggiornamento della versione per Windows.",
-                    color = c.inkDim, fontSize = 14.sp,
-                )
-                Text("Apri il radar della Protezione Civile nel browser", color = c.accent, fontSize = 14.sp,
-                    modifier = Modifier.clickable { WinSys.open("https://mappe.protezionecivile.gov.it/it/mappe-rischi/piattaforma-radar/") })
-            }
-        }
-    }
+    // Stessa schermata radar di Android (codice condiviso): trascina per spostare, rotellina per lo zoom.
+    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 8.dp))) { com.marco.mlmeteo.RadarScreen() }
 }
 
 // ------------------------------------------------------------------ Impostazioni (come Windows 11: categorie a sinistra)

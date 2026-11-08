@@ -1,6 +1,5 @@
 package com.marco.mlmeteo
 
-import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,7 +52,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -395,7 +393,7 @@ fun RadarScreen() {
     val dpc = DpcCache.frames
     var dpcIndex by remember { mutableIntStateOf(-1) }
     LaunchedEffect(dpc) { dpc?.let { l -> dpcIndex = l.indexOfLast { !it.forecast }.coerceAtLeast(0) } }
-    val dpcImages = remember(dpc) { android.util.LruCache<Int, ImageBitmap>(4) }
+    val dpcImages = remember(dpc) { LruCache<Int, ImageBitmap>(4) }
     fun dpcImage(i: Int): ImageBitmap? {
         val l = dpc ?: return null
         val f = l.getOrNull(i) ?: return null
@@ -442,7 +440,7 @@ fun RadarScreen() {
         i2Loading = false
         i2Progress = ""
     }
-    val i2Images = remember(i2, layer) { android.util.LruCache<Int, ImageBitmap>(3) }
+    val i2Images = remember(i2, layer) { LruCache<Int, ImageBitmap>(3) }
     fun i2Image(k: Int): ImageBitmap? {
         val d = i2 ?: return null
         return i2Images.get(k) ?: d.render(k, layer)?.also { i2Images.put(k, it) }
@@ -622,7 +620,7 @@ fun RadarScreen() {
         // ---------------- barra in alto
         Column(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                MapButton(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") { Nav.back() }
+                MapButton(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") { radarBack() }
                 FloatBox(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         Text(place?.name ?: "Radar", color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
@@ -919,6 +917,5 @@ private fun gridBitmap(g: WeatherRepo.Grid, layer: MapLayer, hour: Int): ImageBi
             pixels[(h - 1 - py) * w + px] = if (value.isNaN()) 0 else scale(value, stops).toArgb()
         }
     }
-    val bmp = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
-    return bmp.asImageBitmap()
+    return imageFromPixels(pixels, w, h)
 }

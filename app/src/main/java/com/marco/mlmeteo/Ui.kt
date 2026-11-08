@@ -195,28 +195,3 @@ fun ChoiceDialog(title: String, choices: List<Choice>, selected: String, onPick:
     }
 }
 
-@Composable
-fun Segmented(options: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
-    val c = LocalAppColors.current
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(c.card2)) {
-        options.forEach { (id, label) ->
-            val sel = id == selected
-            Box(
-                Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(22.dp))
-                    .background(if (sel) c.accentContainer else c.card2)
-                    .clickable { onPick(id) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label, color = if (sel) c.onAccentContainer else c.inkDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            }
-        }
-    }
-}
-
-@Composable
-fun Hint(text: String) {
-    Text(text, color = LocalAppColors.current.inkDim, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp))
-}
-
-@Composable
-fun Gap(w: Int) = Spacer(Modifier.width(w.dp))

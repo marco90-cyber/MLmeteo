@@ -1,8 +1,6 @@
 package com.marco.mlmeteo
 
-import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -203,6 +201,6 @@ object Gfs {
             }
         }
         val px = Paint.pixels(vv, OUT_W, h, layer)
-        return Bitmap.createBitmap(px, OUT_W, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+        return imageFromPixels(px, OUT_W, h)
     }
 }

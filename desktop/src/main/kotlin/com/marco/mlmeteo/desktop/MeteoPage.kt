@@ -378,23 +378,11 @@ private fun ScrollArrow(left: Boolean, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun DaysCard(f: Forecast, fmt: Fmt) {
     val c = LocalAppColors.current
-    var tab by remember { mutableStateOf("days") }
     val t = gaugeClock()
     val anim = AppState.settings.animations != "off"
     Card(Modifier.fillMaxWidth()) {
-        Tabs(listOf("tomorrow" to "Domani", "days" to "${AppState.settings.daysCount} giorni"), tab) { tab = it }
-        if (tab == "tomorrow") {
-            val tomorrow = f.localNow.toLocalDate().plusDays(1)
-            f.hours.filter { it.time.toLocalDate() == tomorrow && it.time.hour % 2 == 0 }.forEach { h ->
-                Row(Modifier.fillMaxWidth().uiCard(c.card2).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(fmt.hourLabel(h.time), color = c.ink, fontSize = 14.sp, modifier = Modifier.width(64.dp))
-                    WeatherIcon(h.code, h.isDay, 30.dp, phase = t / fxPeriod(skyOf(h.code)), amp = if (anim) 1f else 0f)
-                    Spacer(Modifier.weight(1f))
-                    if (h.precipProb.ok() && h.precipProb >= 1) Text("${h.precipProb.roundToInt()}%  ", color = c.accent, fontSize = 12.sp)
-                    Text(fmt.temp(h.temp), color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        } else {
+        Text("Prossimi ${AppState.settings.daysCount} giorni", color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        run {
             val days = f.days.take(AppState.settings.daysCount)
             val lo = days.minOfOrNull { it.tMin } ?: 0.0
             val hi = days.maxOfOrNull { it.tMax } ?: 1.0

@@ -1,7 +1,5 @@
 package com.marco.mlmeteo
 
-import android.graphics.BitmapFactory
-import android.util.LruCache
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,7 +15,6 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
@@ -84,7 +81,7 @@ object Tiles {
         if (url in failed || !pending.add(url)) return null
         scope.launch {
             val img = withContext(Dispatchers.IO) {
-                Net.getBytes(url)?.let { b -> BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
+                Net.getBytes(url)?.let { b -> decodeImage(b) }
             }
             pending.remove(url)
             if (img != null) cache.put(url, img) else failed.add(url)
@@ -124,6 +121,9 @@ fun TileMap(
             state.y = (state.y - pan.y / world).coerceIn(0.0, 1.0)
             state.zoom = (state.zoom + log2(zoomChange.toDouble())).coerceIn(minZoom, maxZoom)
         }
+    }.wheelZoom { steps ->
+        // rotellina del mouse (solo su Windows): zoom di mezzo livello per scatto
+        state.zoom = (state.zoom - steps * 0.5).coerceIn(minZoom, maxZoom)
     } else modifier
     Canvas(mod.fillMaxSize()) {
         @Suppress("UNUSED_VARIABLE") val v = Tiles.version // ridisegna quando arrivano tessere

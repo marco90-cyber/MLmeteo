@@ -1,9 +1,7 @@
 package com.marco.mlmeteo
 
-import android.graphics.Bitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.Dispatchers
@@ -346,7 +344,7 @@ object DpcRadar {
         val px = IntArray(W * h)
         val pal = palette
         for (i in px.indices) px[i] = pal[q[i].toInt() and 0xFF]
-        return Bitmap.createBitmap(px, W, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+        return imageFromPixels(px, W, h)
     }
 
     // ------------------------------------------------------------------ radar previsto

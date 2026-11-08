@@ -34,7 +34,7 @@ compose.desktop {
             packageVersion = "1.0.$build"
             description = "Meteo con molte fonti, radar e mappe ad alta risoluzione"
             vendor = "MLapps"
-            modules("java.net.http", "jdk.crypto.ec", "java.prefs")
+            modules("java.net.http", "jdk.crypto.ec", "java.prefs", "jdk.localedata")
             windows {
                 iconFile.set(project.file("icons/mlmeteo.ico"))
                 menu = true
