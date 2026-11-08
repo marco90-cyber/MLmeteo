@@ -543,50 +543,64 @@ private fun SmallCard(item: HomeItem, place: Place, f: Forecast, fmt: Fmt) {
     val cur = f.current
     when (item) {
         HomeItem.HUMIDITY -> Small("Umidità") {
-            Big(if (cur.humidity.ok()) "${cur.humidity.roundToInt()}%" else "—")
-            Sub("Punto di rugiada ${fmt.temp(cur.dewPoint)}")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Big(if (cur.humidity.ok()) "${cur.humidity.roundToInt()}%" else "—")
+                    Sub(when { !cur.humidity.ok() -> ""; cur.humidity < 30 -> "Secca"; cur.humidity < 60 -> "Normale"; cur.humidity < 85 -> "Umida"; else -> "Molto umida" })
+                    Sub("Rugiada ${fmt.temp(cur.dewPoint)}")
+                }
+                HumidityGauge(Modifier.width(18.dp).height(84.dp), ((if (cur.humidity.ok()) cur.humidity else 0.0) / 100.0).toFloat())
+            }
         }
         HomeItem.WIND -> Small("Vento") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val (v, u) = fmt.windParts(cur.windSpeed)
-                    Big(v)
-                    Sub("$u · ${windDirText(cur.windDir)}")
+                    Big(v, u)
+                    Sub(if (cur.windDir.ok()) "Da ${windDirLong(cur.windDir)}" else "")
+                    if (cur.windGusts.ok()) Sub("Raffiche ${fmt.wind(cur.windGusts)}")
                 }
-                Canvas(Modifier.size(56.dp)) {
-                    val r = size.minDimension / 2
-                    drawCircle(c.outline, r - 2.dp.toPx(), style = Stroke(2.dp.toPx()))
-                    if (cur.windDir.ok()) {
-                        // la freccia indica dove va il vento (opposto alla provenienza)
-                        val a = Math.toRadians(cur.windDir + 180 - 90)
-                        val tip = Offset(center.x + (r * 0.75f) * cos(a).toFloat(), center.y + (r * 0.75f) * sin(a).toFloat())
-                        val tail = Offset(center.x - (r * 0.55f) * cos(a).toFloat(), center.y - (r * 0.55f) * sin(a).toFloat())
-                        drawLine(c.accent, tail, tip, 4.dp.toPx(), cap = StrokeCap.Round)
-                        drawCircle(c.accent, 5.dp.toPx(), tip)
-                    }
-                }
+                WindCompass(Modifier.size(64.dp), cur.windDir, cur.windSpeed)
             }
-            if (cur.windGusts.ok()) Sub("Raffiche ${fmt.wind(cur.windGusts)}")
         }
         HomeItem.RAIN -> Small("Pioggia") {
-            val today = f.days.firstOrNull()
             val next24 = f.hours.take(24).map { it.precip }.filter { it.ok() }.sum()
-            val mode = AppState.settings.rainDisplay
-            val prob = f.hours.firstOrNull()?.precipProb ?: Double.NaN
-            if (mode == "mm" || !prob.ok()) Big(fmt.rain(next24)) else Big("${prob.roundToInt()}%")
-            Sub(if (mode == "mm" || !prob.ok()) "nelle prossime 24 ore" else "${fmt.rain(next24)} nelle prossime 24 h")
-            if (today != null && today.precipProb.ok() && mode != "mm") Sub("Oggi max ${today.precipProb.roundToInt()}%")
+            val prob = f.hours.take(24).mapNotNull { h -> h.precipProb.takeIf { it.ok() } }.maxOrNull() ?: Double.NaN
+            val now = f.hours.firstOrNull()
+            val raining = (cur.precip.ok() && cur.precip > 0.05) || (now != null && now.precip.ok() && now.precip > 0.05)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val (v, u) = fmt.rain(next24).let { r -> r.substringBefore(' ') to r.substringAfter(' ', "") }
+                    Big(v, u)
+                    Sub("nelle prossime 24 ore")
+                    if (prob.ok()) Sub("Probabilità max ${prob.roundToInt()}%")
+                }
+                RainBeaker(Modifier.width(62.dp).height(88.dp), next24, raining)
+            }
         }
         HomeItem.UV -> Small("Indice UV") {
             val uv = if (cur.uv.ok()) cur.uv else f.days.firstOrNull()?.uvMax ?: Double.NaN
-            Big(if (uv.ok()) "${uv.roundToInt()}" else "—", uvText(uv))
-            Segments(((if (uv.ok()) uv else 0.0) / 11.0).toFloat().coerceIn(0f, 1f), c.accent)
-            f.days.firstOrNull()?.uvMax?.takeIf { it.ok() }?.let { Sub("Max oggi ${it.roundToInt()}") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Big(if (uv.ok()) "${uv.roundToInt()}" else "—")
+                    Sub(uvText(uv))
+                    f.days.firstOrNull()?.uvMax?.takeIf { it.ok() }?.let { Sub("Max oggi ${it.roundToInt()}") }
+                }
+                VerticalScale(Modifier.width(26.dp).height(84.dp), ((if (uv.ok()) uv else 0.0) / 11.0).toFloat(),
+                    listOf(Color(0xFF4CAF50), Color(0xFFFFEB3B), Color(0xFFFF9800), Color(0xFFE53935), Color(0xFF8E24AA)))
+            }
         }
         HomeItem.PRESSURE -> Small("Pressione") {
             val (v, u) = fmt.pressure(cur.pressure).let { p -> p.substringBefore(' ') to p.substringAfter(' ', "") }
-            Big(v, u)
-            Sub("al livello del mare")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Big(v, u)
+                    Sub(when { !cur.pressure.ok() -> ""; cur.pressure < 1000 -> "Bassa"; cur.pressure > 1025 -> "Alta"; else -> "Normale" })
+                    Sub("al livello del mare")
+                }
+                VerticalScale(Modifier.width(26.dp).height(84.dp), (((if (cur.pressure.ok()) cur.pressure else 1013.0) - 970.0) / 70.0).toFloat(),
+                    listOf(Color(0xFF5C6BC0), Color(0xFF42A5F5), Color(0xFF66BB6A), Color(0xFFFFCA28), Color(0xFFFF7043)))
+            }
         }
         HomeItem.VISIBILITY -> Small("Visibilità") {
             Big(fmt.visibility(cur.visibility))
@@ -603,15 +617,7 @@ private fun SmallCard(item: HomeItem, place: Place, f: Forecast, fmt: Fmt) {
         HomeItem.AIR -> Small("Qualità dell'aria") {
             val a = AppState.air[place.id]
             Big(a?.aqi?.takeIf { it.ok() }?.roundToInt()?.toString() ?: "—", aqiText(a?.aqi ?: Double.NaN))
-            Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(c.outline)) {
-                val frac = ((a?.aqi ?: 0.0) / 100.0).toFloat().coerceIn(0.02f, 1f)
-                val col = when {
-                    (a?.aqi ?: 0.0) <= 40 -> Color(0xFF7BDCB5)
-                    (a?.aqi ?: 0.0) <= 60 -> Color(0xFFFFD27A)
-                    else -> Color(0xFFFF8A80)
-                }
-                Box(Modifier.fillMaxWidth(frac).height(6.dp).clip(CircleShape).background(col))
-            }
+            AqiBar(Modifier.fillMaxWidth().height(14.dp), a?.aqi ?: Double.NaN)
             if (a != null && a.pm25.ok()) Sub("PM2,5 ${a.pm25.roundToInt()} · PM10 ${a.pm10.roundToInt()} µg/m³")
         }
         HomeItem.MOON -> Small("Luna") {
@@ -665,27 +671,47 @@ private fun SunCard(f: Forecast, fmt: Fmt) {
     } else 0f
     CardBox {
         Text("Sole", color = c.inkDim, fontSize = 13.sp)
-        Canvas(Modifier.fillMaxWidth().height(90.dp).padding(top = 6.dp)) {
+        val night = sr != null && ss != null && (now.isAfter(ss) || now.isBefore(sr))
+        val nightProgress = if (night && sr != null && ss != null) {
+            // dal tramonto all'alba (circa 24 ore - durata del giorno)
+            val dayLen = Duration.between(sr, ss).seconds.toFloat()
+            val nightLen = (24 * 3600f - dayLen).coerceAtLeast(1f)
+            val since = if (now.isAfter(ss)) Duration.between(ss, now).seconds.toFloat() else (nightLen - Duration.between(now, sr).seconds.toFloat())
+            (since / nightLen).coerceIn(0f, 1f)
+        } else 0f
+        val grow = rememberGrow(if (night) nightProgress else progress)
+        val t = gaugeClock()
+        Canvas(Modifier.fillMaxWidth().height(110.dp).padding(top = 6.dp)) {
             val w = size.width
             val h = size.height
-            val base = h - 6.dp.toPx()
-            drawLine(c.outline, Offset(0f, base), Offset(w, base), 2.dp.toPx())
+            val base = h * 0.66f
             val left = w * 0.08f
             val right = w * 0.92f
-            val arc = Path().apply {
-                moveTo(left, base)
-                cubicTo(left + (right - left) * 0.2f, -h * 0.25f, right - (right - left) * 0.2f, -h * 0.25f, right, base)
+            fun bez(p0: Offset, p1: Offset, p2: Offset, p3: Offset, tt: Float): Offset {
+                val u = 1 - tt
+                return p0 * (u * u * u) + p1 * (3 * u * u * tt) + p2 * (3 * u * tt * tt) + p3 * (tt * tt * tt)
             }
-            drawPath(arc, c.inkDim.copy(alpha = 0.6f), style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 12f))))
-            // posizione del sole sulla curva di Bézier
-            val t = progress
-            val p0 = Offset(left, base)
-            val p1 = Offset(left + (right - left) * 0.2f, -h * 0.25f)
-            val p2 = Offset(right - (right - left) * 0.2f, -h * 0.25f)
-            val p3 = Offset(right, base)
-            val u = 1 - t
-            val pos = p0 * (u * u * u) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + p3 * (t * t * t)
-            drawCircle(Color(0xFFFFC64A), 8.dp.toPx(), pos)
+            val d0 = Offset(left, base); val d3 = Offset(right, base)
+            val d1 = Offset(left + (right - left) * 0.2f, -base * 0.25f); val d2 = Offset(right - (right - left) * 0.2f, -base * 0.25f)
+            val n1 = Offset(left + (right - left) * 0.2f, h + (h - base) * 0.35f); val n2 = Offset(right - (right - left) * 0.2f, h + (h - base) * 0.35f)
+            val dayArc = Path().apply { moveTo(d0.x, d0.y); cubicTo(d1.x, d1.y, d2.x, d2.y, d3.x, d3.y) }
+            val nightArc = Path().apply { moveTo(d3.x, d3.y); cubicTo(n2.x, n2.y, n1.x, n1.y, d0.x, d0.y) }
+            val dash = PathEffect.dashPathEffect(floatArrayOf(10f, 12f))
+            drawPath(dayArc, c.inkDim.copy(alpha = if (night) 0.35f else 0.6f), style = Stroke(2.dp.toPx(), pathEffect = dash))
+            drawPath(nightArc, c.inkDim.copy(alpha = if (night) 0.6f else 0.3f), style = Stroke(2.dp.toPx(), pathEffect = dash))
+            drawLine(c.outline, Offset(0f, base), Offset(w, base), 2.dp.toPx())
+            if (!night) {
+                val pos = bez(d0, d1, d2, d3, grow)
+                val pulse = 1f + 0.12f * kotlin.math.sin(t * 2f)
+                drawCircle(Color(0xFFFFC64A).copy(alpha = 0.25f), 14.dp.toPx() * pulse, pos)
+                drawCircle(Color(0xFFFFC64A), 8.dp.toPx(), pos)
+            } else {
+                // di notte la luna percorre l'arco sotto l'orizzonte, dal tramonto (destra) all'alba (sinistra)
+                val pos = bez(d3, n2, n1, d0, grow)
+                drawCircle(Color(0xFFE9E3C8).copy(alpha = 0.2f + 0.08f * kotlin.math.sin(t * 1.5f)), 13.dp.toPx(), pos)
+                drawCircle(Color(0xFFE9E3C8), 7.dp.toPx(), pos)
+                drawCircle(c.card, 6.dp.toPx(), pos + Offset(3.5f.dp.toPx(), -2.5f.dp.toPx()))
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Alba ${fmt.time(sr)}", color = c.ink, fontSize = 15.sp)

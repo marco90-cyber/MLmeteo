@@ -30,6 +30,7 @@ val IconSets = listOf(
     Triple(9, "Morbido", "Nuvole sfumate dal bianco"),
     Triple(10, "Contrasto", "Nuvole scure, sole arancione"),
     Triple(11, "Due toni", "Nuvole chiare con la base più scura"),
+    Triple(12, "Fluent", "Forme semplici nel colore d'accento"),
 )
 
 fun iconSetName(id: Int) = IconSets.firstOrNull { it.first == id }?.second ?: "Colorate"
@@ -73,6 +74,12 @@ private class Pal(
         10 -> when (kind) {
             "sun" -> Color(0xFFFF8A3D); "bolt" -> Color(0xFFFFB020); "moon" -> Color(0xFFFFB067); "drop" -> Color(0xFF63B3ED)
             "snow" -> Color(0xFFE2E8F0); "dark" -> Color(0xFF2D3748); else -> Color(0xFF4A5568)
+        }
+        12 -> when (kind) {
+            "sun", "bolt", "moon" -> accent
+            "drop", "snow" -> androidx.compose.ui.graphics.lerp(accent, Color(0xFF3D8BFF), 0.35f)
+            "dark" -> androidx.compose.ui.graphics.lerp(accent, Color(0xFF5F6B78), 0.55f)
+            else -> androidx.compose.ui.graphics.lerp(accent, Color(0xFFE8ECF2), 0.72f)
         }
         11 -> when (kind) {
             "sun", "bolt" -> Color(0xFFFFC531); "moon" -> Color(0xFFF4D77A); "drop" -> Color(0xFF4FA3FF)
@@ -138,7 +145,7 @@ private class Pal(
     }
 
     /** Spessore delle linee (raggi e gocce). */
-    val lineW get() = if (set == 8) 3.6f else 2.8f
+    val lineW get() = when (set) { 8 -> 3.6f; 12 -> 2.4f; else -> 2.8f }
 
     fun DrawScope.line(x1: Float, y1: Float, x2: Float, y2: Float, kind: String, alpha: Float = 1f) {
         if (alpha <= 0.01f) return
