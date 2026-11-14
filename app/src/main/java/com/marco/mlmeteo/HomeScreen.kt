@@ -11,6 +11,8 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.foundation.gestures.scrollBy
@@ -989,7 +991,7 @@ private fun AlertsBanner(place: Place) {
         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(bg).clickable { open = true }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Warning, contentDescription = null, tint = fg)
+        Icon(alertIcon(top), contentDescription = null, tint = fg)
         Gap(12)
         Column(Modifier.weight(1f)) {
             Text(top.title, color = fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -1007,7 +1009,11 @@ private fun AlertsBanner(place: Place) {
                     list.forEach { a ->
                         val (b2, f2) = alertColors(a.level, c.dark)
                         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(b2).padding(12.dp)) {
-                            Text(a.title, color = f2, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(alertIcon(a), contentDescription = null, tint = f2, modifier = Modifier.size(20.dp))
+                                Gap(8)
+                                Text(a.title, color = f2, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
                             Text("${a.area} · ${alertWhen(a)}", color = f2, fontSize = 13.sp)
                             Text(a.detail + "\nFonte: ${a.source}", color = f2, fontSize = 12.sp)
                         }
@@ -1017,6 +1023,12 @@ private fun AlertsBanner(place: Place) {
             confirmButton = { androidx.compose.material3.TextButton(onClick = { open = false }) { Text("Chiudi") } },
         )
     }
+}
+
+private fun alertIcon(a: Alert) = when (a.kind) {
+    "wind" -> Icons.Filled.Air
+    "rain" -> Icons.Filled.Thunderstorm
+    else -> Icons.Filled.Warning
 }
 
 private fun alertColors(level: Int, dark: Boolean): Pair<Color, Color> = when (level) {

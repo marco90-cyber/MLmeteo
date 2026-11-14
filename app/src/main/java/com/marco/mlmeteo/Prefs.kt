@@ -51,6 +51,8 @@ object Prefs {
             apiKeys = keys,
             notifAlerts = p.getBoolean("notifAlerts", d.notifAlerts),
             alertMinLevel = p.getInt("alertMinLevel", d.alertMinLevel),
+            alertWind = p.getBoolean("alertWind", d.alertWind),
+            alertRain = p.getBoolean("alertRain", d.alertRain),
             notifRain = p.getBoolean("notifRain", d.notifRain),
             notifMorning = p.getBoolean("notifMorning", d.notifMorning),
             morningMinutes = p.getInt("morningMinutes", d.morningMinutes),
@@ -99,6 +101,8 @@ object Prefs {
             .putString("apiKeys", keys.toString())
             .putBoolean("notifAlerts", s.notifAlerts)
             .putInt("alertMinLevel", s.alertMinLevel)
+            .putBoolean("alertWind", s.alertWind)
+            .putBoolean("alertRain", s.alertRain)
             .putBoolean("notifRain", s.notifRain)
             .putBoolean("notifMorning", s.notifMorning)
             .putInt("morningMinutes", s.morningMinutes)

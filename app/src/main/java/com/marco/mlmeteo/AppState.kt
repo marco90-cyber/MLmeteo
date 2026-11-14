@@ -123,6 +123,14 @@ object AppState {
 
     fun refreshAll() = places.forEach { refresh(it) }
 
+    /** Ricalcola le allerte (ad es. dopo aver cambiato le impostazioni) senza riscaricare le previsioni. */
+    fun refreshAlerts() = places.forEach { p ->
+        scope.launch {
+            try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { }
+            Widgets.updateAll(app)
+        }
+    }
+
     fun refresh(p: Place) {
         if (loading[p.id] == true) return
         loading[p.id] = true
@@ -144,7 +152,7 @@ object AppState {
                 loading[p.id] = false
             }
             WeatherRepo.airQuality(p)?.let { air[p.id] = it; WidgetStore.saveAir(app, p.id, it.aqi) }
-            try { alerts[p.id] = AlertsRepo.forPlace(p).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { AppLog.w("Allerte ${p.name}: ${e.message}") }
+            try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { AppLog.w("Allerte ${p.name}: ${e.message}") }
             Widgets.updateAll(app)
         }
     }

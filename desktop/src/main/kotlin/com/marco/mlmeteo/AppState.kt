@@ -85,12 +85,20 @@ object AppState {
             }
             loading = false
             try { WeatherRepo.airQuality(p)?.let { air[p.id] = it } } catch (e: Exception) { }
-            try { alerts[p.id] = AlertsRepo.forPlace(p) } catch (e: Exception) { }
+            try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings) } catch (e: Exception) { }
             Desktop.onDataChanged()
         }
     }
 
     fun refreshAll(force: Boolean = false) = places.toList().forEach { refresh(it, force) }
+
+    /** Ricalcola le allerte (ad es. dopo aver cambiato le impostazioni) senza riscaricare le previsioni. */
+    fun refreshAlerts() = places.toList().forEach { p ->
+        scope.launch {
+            try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings) } catch (e: Exception) { }
+            Desktop.onDataChanged()
+        }
+    }
 
     // ------------------------------------------------------------------ località
 
@@ -135,6 +143,7 @@ object AppState {
             .put("tempUnit", s.tempUnit).put("windUnit", s.windUnit).put("rainUnit", s.rainUnit)
             .put("pressureUnit", s.pressureUnit).put("visUnit", s.visUnit).put("clock24", s.clock24)
             .put("daysCount", s.daysCount).put("mainPlaceId", s.mainPlaceId).put("notifAlerts", s.notifAlerts)
+            .put("alertWind", s.alertWind).put("alertRain", s.alertRain).put("alertMinLevel", s.alertMinLevel)
             .put("notifRain", s.notifRain).put("updateFreq", s.updateFreq).put("radarModel", s.radarModel)
             .put("closeToTray", closeToTray).put("autostart", autostart).put("zoom", zoom).put("selectedId", selectedId)
             .put("hidden", JSONArray(s.hidden.toList())).put("homeOrder", JSONArray(s.homeOrder))
@@ -168,6 +177,9 @@ object AppState {
                 daysCount = o.optInt("daysCount", d.daysCount),
                 mainPlaceId = o.optString("mainPlaceId", d.mainPlaceId),
                 notifAlerts = o.optBoolean("notifAlerts", d.notifAlerts),
+                alertWind = o.optBoolean("alertWind", d.alertWind),
+                alertRain = o.optBoolean("alertRain", d.alertRain),
+                alertMinLevel = o.optInt("alertMinLevel", d.alertMinLevel),
                 notifRain = o.optBoolean("notifRain", d.notifRain),
                 updateFreq = o.optInt("updateFreq", d.updateFreq),
                 radarModel = o.optString("radarModel", d.radarModel),

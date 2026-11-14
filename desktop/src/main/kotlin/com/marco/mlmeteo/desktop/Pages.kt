@@ -320,6 +320,12 @@ private fun NotifSettings() {
     SetRow("Livello minimo") {
         Choices(listOf("1" to "Gialla", "2" to "Arancione", "3" to "Rossa"), s.alertMinLevel.toString()) { v -> AppState.update { it.copy(alertMinLevel = v.toInt()) } }
     }
+    SetRow("Vento forte", "Calcolata dalla previsione: raffiche da 60 km/h (grave da 75)") {
+        Toggle(s.alertWind) { v -> AppState.update { it.copy(alertWind = v) }; AppState.refreshAlerts() }
+    }
+    SetRow("Pioggia forte", "Calcolata dalla previsione: da 10 mm/h o 30 mm (grave da 20 mm/h o 50 mm)") {
+        Toggle(s.alertRain) { v -> AppState.update { it.copy(alertRain = v) }; AppState.refreshAlerts() }
+    }
 }
 
 @Composable

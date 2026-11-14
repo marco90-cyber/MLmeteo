@@ -22,6 +22,8 @@ data class Alert(
     val start: ZonedDateTime?,
     val end: ZonedDateTime?,
     val detail: String = "",
+    /** Tipo di fenomeno: "wind", "rain" o vuoto. */
+    val kind: String = "",
 )
 
 fun levelName(level: Int) = when (level) { 1 -> "gialla"; 2 -> "arancione"; 3 -> "rossa"; else -> "" }
@@ -38,7 +40,18 @@ object AlertsRepo {
 
     private val cache = HashMap<String, Pair<Long, List<Alert>>>()
 
-    suspend fun forPlace(p: Place, force: Boolean = false): List<Alert> = withContext(Dispatchers.IO) {
+    /**
+     * Allerte ufficiali più, se si passano previsione e impostazioni, quelle calcolate dalla previsione
+     * (vento forte e pioggia forte, vedi [SevereAlerts]).
+     */
+    suspend fun forPlace(p: Place, force: Boolean = false, f: Forecast? = null, s: Settings? = null): List<Alert> {
+        val official = official(p, force)
+        if (f == null || s == null) return official
+        val computed = try { SevereAlerts.compute(p, f, s) } catch (e: Exception) { emptyList() }
+        return (official + computed).sortedWith(compareByDescending<Alert> { it.level }.thenBy { it.start })
+    }
+
+    private suspend fun official(p: Place, force: Boolean): List<Alert> = withContext(Dispatchers.IO) {
         cache[p.id]?.let { if (!force && System.currentTimeMillis() - it.first < 30 * 60_000) return@withContext it.second }
         val out = ArrayList<Alert>()
         val italy = p.cc == "it" || (p.cc.isBlank() && p.region.contains("Italia"))
@@ -192,6 +205,7 @@ object AlertsRepo {
                 "ma-" + tag(entry, "cap:identifier"), "MeteoAlarm", lv,
                 "Allerta ${levelName(lv)} · $type", area, time("cap:onset") ?: time("cap:effective"), time("cap:expires"),
                 "Avviso dei servizi meteo nazionali (MeteoAlarm) per $area.",
+                kind = when (type) { "Vento" -> "wind"; "Pioggia", "Piene", "Alluvioni" -> "rain"; else -> "" },
             )
         }
         return out

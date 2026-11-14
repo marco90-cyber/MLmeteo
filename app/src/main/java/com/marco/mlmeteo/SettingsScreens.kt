@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -450,7 +451,7 @@ fun NotificationsScreen() {
         }
         Hint("Allerte e pioggia riguardano la località con la campanella" + (main?.let { ": ${it.name}." } ?: "."))
         Group {
-            SwitchRow("Allerte meteo", "Protezione Civile e MeteoAlarm", Icons.Filled.Notifications, checked = s.notifAlerts) { v ->
+            SwitchRow("Allerte meteo", "Protezione Civile, MeteoAlarm e previsione", Icons.Filled.Notifications, checked = s.notifAlerts) { v ->
                 AppState.update { it.copy(notifAlerts = v) }; if (v) need()
             }
             if (s.notifAlerts) {
@@ -460,6 +461,14 @@ fun NotificationsScreen() {
                     listOf(Choice("1", "Da gialla"), Choice("2", "Da arancione"), Choice("3", "Solo rossa")),
                     s.alertMinLevel.toString(),
                 ) { v -> AppState.update { it.copy(alertMinLevel = v.toInt()) } }
+                Divider()
+                SwitchRow("Vento forte", "Calcolata dalla previsione: raffiche da 60 km/h (grave da 75)", Icons.Filled.Air, checked = s.alertWind) { v ->
+                    AppState.update { it.copy(alertWind = v) }; AppState.refreshAlerts()
+                }
+                Divider()
+                SwitchRow("Pioggia forte", "Calcolata dalla previsione: da 10 mm/h o 30 mm (grave da 20 mm/h o 50 mm)", Icons.Filled.Thunderstorm, checked = s.alertRain) { v ->
+                    AppState.update { it.copy(alertRain = v) }; AppState.refreshAlerts()
+                }
             }
             Divider()
             SwitchRow("Pioggia in arrivo", "\"Pioggia tra circa 15 minuti\"", Icons.Filled.WaterDrop, checked = s.notifRain) { v ->

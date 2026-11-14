@@ -110,13 +110,13 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         }
         // allerte e qualità dell'aria per i widget, radar per il widget radar
         for (p in places.filter { it.id in wanted }) {
-            try { WidgetStore.saveAlertLevel(ctx, p.id, AlertsRepo.forPlace(p)) } catch (e: Exception) { }
+            try { WidgetStore.saveAlertLevel(ctx, p.id, AlertsRepo.forPlace(p, f = ForecastStore.load(ctx, p.id), s = s)) } catch (e: Exception) { }
             try { WeatherRepo.airQuality(p)?.let { WidgetStore.saveAir(ctx, p.id, it.aqi) } } catch (e: Exception) { }
         }
         try { RadarWidgetData.prepare(ctx) } catch (e: Exception) { AppLog.w("Widget radar: ${e.message}") }
         Widgets.refreshDone(ctx)
         Widgets.updateAll(ctx)
-        if (s.notifAlerts) try { Notify.alerts(ctx, main, AlertsRepo.forPlace(main, force = true), s) } catch (e: Exception) { }
+        if (s.notifAlerts) try { Notify.alerts(ctx, main, AlertsRepo.forPlace(main, force = true, f = ForecastStore.load(ctx, main.id), s = s), s) } catch (e: Exception) { }
         if (s.notifRain) try { Notify.rainSoon(ctx, main, s) } catch (e: Exception) { }
         return Result.success()
     }

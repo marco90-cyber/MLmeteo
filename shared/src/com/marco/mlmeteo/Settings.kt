@@ -58,6 +58,9 @@ data class Settings(
     // notifiche e aggiornamento in background
     val notifAlerts: Boolean = true,
     val alertMinLevel: Int = 1,
+    /** Allerte calcolate dalla previsione: vento forte e pioggia forte. */
+    val alertWind: Boolean = true,
+    val alertRain: Boolean = true,
     val notifRain: Boolean = true,
     val notifMorning: Boolean = true,
     /** Orario della previsione del mattino, in minuti dalla mezzanotte (8:00). */
