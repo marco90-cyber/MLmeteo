@@ -234,7 +234,7 @@ private fun ContentStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
     Group {
         SwitchRow("Pallino allerta", "Giallo, arancione o rosso quando c'è un'allerta", checked = cfg.showAlert) { set(cfg.copy(showAlert = it)) }
         Divider()
-        SwitchRow("Ultimo aggiornamento", "Orario scritto in piccolo sotto il nome", checked = cfg.showUpdated) { set(cfg.copy(showUpdated = it)) }
+        SwitchRow("Ultimo aggiornamento", "Piccola icona con l'orario accanto al nome", checked = cfg.showUpdated) { set(cfg.copy(showUpdated = it)) }
     }
 }
 
@@ -274,7 +274,7 @@ private fun SizeStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
     Hint("Ingrandisci o rimpicciolisci ogni parte. Se non c'è più spazio, si nascondono prima le parti in fondo.")
     val shown = WidgetSizeKeys.filter { (k, _) ->
         when (k) {
-            "current" -> cfg.showCurrent
+            "currentIcon", "currentTemp" -> cfg.showCurrent
             "extras" -> cfg.extras.isNotEmpty()
             "hoursIcon", "hoursText" -> cfg.showHours
             "rain" -> cfg.showRain
@@ -282,7 +282,7 @@ private fun SizeStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
         }
     }
     shown.forEach { (key, label) ->
-        val v = cfg.sizes[key] ?: 100
+        val v = cfg.sizes[key] ?: (if (key.startsWith("current")) cfg.sizes["current"] else null) ?: 100
         CardBox {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(label, color = c.ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
