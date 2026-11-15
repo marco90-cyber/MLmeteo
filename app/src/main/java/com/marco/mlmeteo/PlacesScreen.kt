@@ -1,5 +1,28 @@
 package com.marco.mlmeteo
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -63,7 +86,8 @@ fun PlacesScreen() {
         }
         searching = false
     }
-    Page("Località") {
+    val scroll = rememberScrollState()
+    Page("Località", scroll) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -98,45 +122,172 @@ fun PlacesScreen() {
             if (gps != null) PlaceCard(gps, -1, s.mainPlaceId == "gps")
             else Hint(AppState.gpsStatus.ifBlank { "Posizione GPS non ancora disponibile." })
         }
-        val saved = AppState.savedPlaces
-        val rowHeight = with(LocalDensity.current) { 124.dp.toPx() }
-        var dragIndex by remember { mutableStateOf(-1) }
-        var dragOffset by remember { mutableFloatStateOf(0f) }
-        saved.forEachIndexed { i, p ->
-            val currentIndex by rememberUpdatedState(i)
-            val handle = Modifier.pointerInput(p.id) {
-                detectDragGestures(
-                    onDragStart = { dragIndex = currentIndex; dragOffset = 0f },
-                    onDragEnd = { dragIndex = -1; dragOffset = 0f },
-                    onDragCancel = { dragIndex = -1; dragOffset = 0f },
-                ) { change, amount ->
-                    change.consume()
-                    dragOffset += amount.y
-                    val idx = dragIndex
-                    if (dragOffset > rowHeight * 0.6f && idx < AppState.savedPlaces.lastIndex) {
-                        AppState.movePlace(idx, idx + 1); dragIndex = idx + 1; dragOffset -= rowHeight
-                    } else if (dragOffset < -rowHeight * 0.6f && idx > 0) {
-                        AppState.movePlace(idx, idx - 1); dragIndex = idx - 1; dragOffset += rowHeight
-                    }
-                }
-            }
-            Column(Modifier.graphicsLayer { translationY = if (dragIndex == i) dragOffset else 0f }) {
-                PlaceCard(p, i, s.mainPlaceId == p.id, handle)
-            }
-        }
+        ReorderablePlaces(scroll, s.mainPlaceId)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
             Icon(Icons.Filled.Notifications, contentDescription = null, tint = c.accent, modifier = Modifier.size(16.dp))
             Gap(8)
             Text(
-                "La campanella indica la località per le allerte. Trascina la maniglia per riordinare. Cerca in alto per aggiungere.",
+                "La campanella indica la località per le allerte. Trascina la maniglia (o tieni premuta la località) per riordinare. Cerca in alto per aggiungere.",
                 color = c.inkDim, fontSize = 13.sp,
             )
         }
     }
 }
 
+/**
+ * Località salvate riordinabili: si trascina dalla maniglia (subito) o tenendo premuta la card.
+ * Durante il trascinamento la lista NON viene modificata: la card sollevata segue il dito e le
+ * altre scivolano per farle posto; l'ordine viene salvato solo al rilascio.
+ */
 @Composable
-private fun PlaceCard(p: Place, index: Int, main: Boolean, handle: Modifier? = null) {
+private fun ReorderablePlaces(scroll: ScrollState, mainId: String?) {
+    val saved = AppState.savedPlaces
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    val gapPx = with(density) { 12.dp.toPx() }
+    val edgePx = with(density) { 96.dp.toPx() }
+    val topLimitPx = with(density) { 140.dp.toPx() }
+    val windowH = LocalView.current.rootView.height.toFloat()
+    val scope = rememberCoroutineScope()
+
+    val heights = remember { mutableStateMapOf<String, Int>() }
+    val tops = remember { mutableStateMapOf<String, Float>() }
+    var dragId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var fingerY by remember { mutableFloatStateOf(0f) }
+    var target by remember { mutableIntStateOf(-1) }
+    val settle = remember { Animatable(0f) }
+    var settleId by remember { mutableStateOf<String?>(null) }
+
+    // le funzioni sotto sono chiamate dai gesti: leggono sempre lo stato attuale, non valori catturati
+    fun list() = AppState.savedPlaces
+    fun fromIdx() = list().indexOfFirst { it.id == dragId }
+    fun h(i: Int) = (heights[list()[i].id] ?: 0) + gapPx
+    val from = fromIdx()
+
+    fun retarget() {
+        val from = fromIdx()
+        val saved = list()
+        if (from < 0) return
+        var t = from
+        if (dragOffset > 0) {
+            var acc = 0f
+            for (k in from + 1..saved.lastIndex) { acc += h(k); if (dragOffset > acc - h(k) / 2) t = k else break }
+        } else {
+            var acc = 0f
+            for (k in from - 1 downTo 0) { acc += h(k); if (-dragOffset > acc - h(k) / 2) t = k else break }
+        }
+        if (t != target) { if (target >= 0) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); target = t }
+    }
+
+    fun start(id: String, startFingerY: Float) {
+        scope.launch { settle.snapTo(0f) }
+        settleId = null
+        dragId = id; dragOffset = 0f; fingerY = startFingerY
+        target = list().indexOfFirst { it.id == id }
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+
+    fun end(commit: Boolean) {
+        val f = fromIdx()
+        val id = dragId ?: return
+        val t = target
+        var residual = dragOffset
+        if (commit && f >= 0 && t >= 0 && t != f) {
+            // la card finisce nella nuova posizione: tolgo lo spazio già percorso
+            residual -= if (t > f) (f + 1..t).sumOf { h(it).toDouble() }.toFloat()
+            else -(t until f).sumOf { h(it).toDouble() }.toFloat()
+            AppState.movePlace(f, t)
+        }
+        dragId = null; dragOffset = 0f; target = -1
+        settleId = id
+        scope.launch { settle.snapTo(residual); settle.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)); if (settleId == id) settleId = null }
+    }
+
+    // scorrimento automatico quando il dito si avvicina ai bordi dello schermo
+    LaunchedEffect(dragId) {
+        if (dragId == null) return@LaunchedEffect
+        while (true) {
+            withFrameNanos { }
+            val speed = when {
+                fingerY < topLimitPx + edgePx -> -(1f - ((fingerY - topLimitPx) / edgePx).coerceIn(0f, 1f))
+                fingerY > windowH - edgePx -> (1f - ((windowH - fingerY) / edgePx).coerceIn(0f, 1f))
+                else -> 0f
+            } * 28f
+            if (speed != 0f) {
+                val used = scroll.scrollBy(speed)
+                if (used != 0f) { dragOffset += used; retarget() }
+            }
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        saved.forEachIndexed { i, p ->
+            key(p.id) {
+                val isDragged = p.id == dragId
+                val dh = (dragId?.let { heights[it] } ?: 0) + gapPx
+                val shiftTarget = when {
+                    from < 0 || isDragged -> 0f
+                    target > from && i in (from + 1)..target -> -dh
+                    target < from && i in target until from -> dh
+                    else -> 0f
+                }
+                val shift by animateFloatAsState(
+                    shiftTarget,
+                    if (dragId != null) spring(stiffness = Spring.StiffnessMediumLow) else snap(),
+                    label = "shift",
+                )
+                val lift by animateFloatAsState(if (isDragged) 1f else 0f, label = "lift")
+                val handle = Modifier.pointerInput(p.id) {
+                    detectDragGestures(
+                        onDragStart = { _ -> start(p.id, (tops[p.id] ?: 0f) + (heights[p.id] ?: 0) / 2f) },
+                        onDragEnd = { end(true) },
+                        onDragCancel = { end(false) },
+                    ) { change, amount ->
+                        change.consume()
+                        dragOffset += amount.y; fingerY += amount.y
+                        retarget()
+                    }
+                }
+                Box(
+                    Modifier
+                        .onGloballyPositioned { if (!isDragged) tops[p.id] = it.positionInRoot().y }
+                        .onSizeChanged { heights[p.id] = it.height }
+                        .zIndex(if (isDragged || settleId == p.id) 10f else 0f)
+                        .graphicsLayer {
+                            translationY = when {
+                                isDragged -> dragOffset
+                                settleId == p.id -> settle.value
+                                dragId != null -> shift
+                                else -> 0f
+                            }
+                            val sc = 1f + 0.03f * lift
+                            scaleX = sc; scaleY = sc
+                            shadowElevation = 24f * lift
+                            shape = RoundedCornerShape(24.dp)
+                            clip = false
+                        }
+                        .pointerInput(p.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { off -> start(p.id, (tops[p.id] ?: 0f) + off.y) },
+                                onDragEnd = { end(true) },
+                                onDragCancel = { end(false) },
+                            ) { change, amount ->
+                                change.consume()
+                                dragOffset += amount.y; fingerY += amount.y
+                                retarget()
+                            }
+                        }
+                ) {
+                    PlaceCard(p, i, mainId == p.id, handle, clickEnabled = dragId == null)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaceCard(p: Place, index: Int, main: Boolean, handle: Modifier? = null, clickEnabled: Boolean = true) {
     val c = LocalAppColors.current
     val s = AppState.settings
     val f = AppState.forecasts[p.id]
@@ -144,7 +295,7 @@ private fun PlaceCard(p: Place, index: Int, main: Boolean, handle: Modifier? = n
     LaunchedEffect(p.id) { AppState.refreshIfOld(p) }
     Row(
         Modifier.fillMaxWidth().padding(bottom = 8.dp).uiCard(if (main) c.accentContainer.copy(alpha = 0.45f) else c.card)
-            .clickable {
+            .clickable(enabled = clickEnabled) {
                 Nav.page = AppState.places.indexOfFirst { it.id == p.id }.coerceAtLeast(0)
                 Nav.back()
             }

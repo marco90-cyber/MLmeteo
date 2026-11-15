@@ -47,7 +47,11 @@ import androidx.compose.ui.unit.sp
 
 /** Pagina standard con barra in alto e contenuto scorrevole. */
 @Composable
-fun Page(title: String, content: @Composable ColumnScope.() -> Unit) {
+fun Page(
+    title: String,
+    scroll: androidx.compose.foundation.ScrollState = rememberScrollState(),
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val c = LocalAppColors.current
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -57,7 +61,7 @@ fun Page(title: String, content: @Composable ColumnScope.() -> Unit) {
             Text(title, color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.Medium)
         }
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding(),
+            Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 16.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             content()
