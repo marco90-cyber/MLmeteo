@@ -467,7 +467,7 @@ object Widgets {
         val chW = ex.map { dp(8f) + chIc + dp(5f) + chPaint.measureText(it.second) + dp(10f) }
         val alertOn = cfg.showAlert && WidgetStore.alertLevel(ctx, place.id) > 0
         val topRightEnd = w - pad - refreshSpace - (if (alertOn) dp(34f) else 0f)
-        val buttonsBottom = dp(48f) // fin dove arrivano i tasti in alto a destra
+        val buttonsBottom = dp(40f) // fin dove arriva il disegno dei tasti in alto a destra (⟳ e allerta)
         // caps = pillole per riga, offs = spostamento della riga (le righe non piene vanno al centro delle colonne)
         class Grid(val left: Float, val colW: Float, val caps: List<Int>, val offs: List<Float>, val heightPx: Float)
         fun grid(k: Int): Grid? {
@@ -481,7 +481,8 @@ object Widgets {
             while (placed < ex.size) {
                 val under = top < buttonsBottom
                 val cap = minOf(if (under) k0 else k, ex.size - placed)
-                var off = if (cap in 1 until k) (k - cap) * (colW + chGapH) / 2 else 0f
+                // solo la prima riga (quella accanto al tasto ⟳) va al centro delle colonne; le altre restano allineate
+                var off = if (caps.isEmpty() && cap in 1 until k) (k - cap) * (colW + chGapH) / 2 else 0f
                 if (left + off + cap * colW + (cap - 1) * chGapH > (if (under) topRightEnd else w - pad)) off = 0f
                 caps += cap; offs += off; placed += cap; top += chH + chGapV
             }
