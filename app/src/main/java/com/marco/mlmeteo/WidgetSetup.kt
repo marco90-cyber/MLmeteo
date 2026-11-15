@@ -271,9 +271,13 @@ private fun ExtrasStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
 @Composable
 private fun SizeStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
     val c = LocalAppColors.current
-    Hint("Ingrandisci o rimpicciolisci ogni parte. Se non c'è più spazio, si nascondono prima le parti in fondo.")
+    Hint("Ingrandisci o rimpicciolisci ogni parte. Senza sovrapposizione, se non c'è più spazio si nascondono prima le parti in fondo.")
+    Group {
+        SwitchRow("Sovrapposizione", "Ingrandendo un elemento può andare sopra gli altri, così nessuna parte sparisce", checked = cfg.overlap) { set(cfg.copy(overlap = it)) }
+    }
     val shown = WidgetSizeKeys.filter { (k, _) ->
         when (k) {
+            "name" -> true
             "currentIcon", "currentTemp" -> cfg.showCurrent
             "extras" -> cfg.extras.isNotEmpty()
             "hoursIcon", "hoursText" -> cfg.showHours

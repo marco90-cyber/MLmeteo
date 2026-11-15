@@ -447,11 +447,19 @@ object Widgets {
         // ---------------- piano: cosa entra, in ordine di priorità
         // meteo attuale → prossime ore → dati extra → pioggia → giorni
         val ex = extrasFor(ctx, cfg, place, f)
+        // sovrapposizione accesa: lo spazio si divide come se tutto fosse al 100%, poi ogni elemento
+        // si disegna con la sua grandezza (può finire sopra gli altri, ma nessuna parte sparisce)
+        val ov = cfg.overlap
+        fun pl(key: String) = if (ov) 1f else cfg.size(key)
         val sEx = cfg.size("extras"); val sRain = cfg.size("rain")
+        val sExP = pl("extras"); val sRainP = pl("rain")
         // icona e temperatura hanno grandezze separate
-        val sIcon = cfg.size("currentIcon"); val sTemp = cfg.size("currentTemp"); val sMax = maxOf(sIcon, sTemp)
+        val sIcon = cfg.size("currentIcon"); val sTemp = cfg.size("currentTemp")
+        val sIconP = pl("currentIcon"); val sTempP = pl("currentTemp"); val sMaxP = maxOf(sIconP, sTempP)
         val hIs = cfg.size("hoursIcon"); val hTs = cfg.size("hoursText"); val dIs = cfg.size("daysIcon"); val dTs = cfg.size("daysText")
-        val baseBlockDp = (if (hDp < 170) 52f else 64f) * sMax
+        val hIsP = pl("hoursIcon"); val hTsP = pl("hoursText"); val dIsP = pl("daysIcon"); val dTsP = pl("daysText")
+        val sName = cfg.size("name"); val sNameP = pl("name")
+        val baseBlockDp = (if (hDp < 170) 52f else 64f) * sMaxP
 
         // dati extra accanto a nome e temperatura: pillole tutte uguali, in colonne allineate a destra
         val chH = dp(24f * sEx); val chGapV = dp(5f); val chGapH = dp(6f)
@@ -460,27 +468,44 @@ object Widgets {
         val alertOn = cfg.showAlert && WidgetStore.alertLevel(ctx, place.id) > 0
         val topRightEnd = w - pad - refreshSpace - (if (alertOn) dp(34f) else 0f)
         val buttonsBottom = dp(48f) // fin dove arrivano i tasti in alto a destra
-        class Grid(val left: Float, val colW: Float, val caps: List<Int>, val heightPx: Float)
+        // caps = pillole per riga, offs = spostamento della riga (le righe non piene vanno al centro delle colonne)
+        class Grid(val left: Float, val colW: Float, val caps: List<Int>, val offs: List<Float>, val heightPx: Float)
         fun grid(k: Int): Grid? {
             val colW = chW.maxOrNull() ?: return null
             val left = w - pad - (k * colW + (k - 1) * chGapH)
             if (left - pad - dp(12f) < dp(150f)) return null // a sinistra serve spazio per nome, icona e temperatura
             var k0 = 0
             while (k0 < k && left + (k0 + 1) * colW + k0 * chGapH <= topRightEnd) k0++
-            val caps = ArrayList<Int>()
+            val caps = ArrayList<Int>(); val offs = ArrayList<Float>()
             var top = pad; var placed = 0
             while (placed < ex.size) {
-                val cap = minOf(if (top < buttonsBottom) k0 else k, ex.size - placed)
-                caps += cap; placed += cap; top += chH + chGapV
+                val under = top < buttonsBottom
+                val cap = minOf(if (under) k0 else k, ex.size - placed)
+                var off = if (cap in 1 until k) (k - cap) * (colW + chGapH) / 2 else 0f
+                if (left + off + cap * colW + (cap - 1) * chGapH > (if (under) topRightEnd else w - pad)) off = 0f
+                caps += cap; offs += off; placed += cap; top += chH + chGapV
             }
-            // le righe vuote in cima (sotto i tasti) non contano
-            val used = caps.dropWhile { it == 0 }
-            if (used.isEmpty()) return null
-            return Grid(left, colW, caps, caps.size * chH + (caps.size - 1) * chGapV)
+            if (caps.all { it == 0 }) return null
+            // per dividere lo spazio conta l'altezza al 100% se la sovrapposizione è accesa
+            val chHP = dp(24f * sExP)
+            return Grid(left, colW, caps, offs, caps.size * chHP + (caps.size - 1) * chGapV)
         }
         val gr = if (cfg.showCurrent && ex.isNotEmpty() && wDp >= 290) (minOf(ex.size, 4) downTo 1).firstNotNullOfOrNull { grid(it) } else null
         val sideExtras = gr != null
-        val headerDp = if (sideExtras) 40f else 24f
+        // nome della città: cresce da solo fino quasi alla prima pillola (al massimo +40%), più lo slider "Nome città"
+        val updP = p.text(10f, if (busy) c.accent else c.inkDim)
+        val updShort = if (busy) "…" else fmt.time(upd)
+        val updW = if (cfg.showUpdated) dp(6f) + dp(12f) + dp(3f) + updP.measureText(updShort) else 0f
+        val nameMax = if (gr != null) {
+            val firstRow = gr.caps.indexOfFirst { it > 0 }
+            (if (firstRow == 0) gr.left + gr.offs[0] - dp(10f) else gr.left - dp(12f)) - pad
+        } else w - pad * 2 - refreshSpace - (if (alertOn) dp(34f) else 0f)
+        val name16 = p.text(16f, c.ink, true).measureText(place.name).coerceAtLeast(1f)
+        val autoName = (16f * (nameMax - updW) / name16).coerceIn(16f, 16f * 1.4f)
+        val nameSp = autoName * sName; val nameSpP = autoName * sNameP
+        val grow = nameSpP / 16f
+        val subSp = 12f * (1f + (nameSp / 16f - 1f) * 0.5f); val subSpP = 12f * (1f + (grow - 1f) * 0.5f)
+        val headerDp = nameSpP + (if (sideExtras) subSpP + 4f else 0f) + 8f
         // il blocco icona + temperatura è alto almeno quanto le pillole a destra
         var blockDp = when {
             !cfg.showCurrent -> 0f
@@ -496,19 +521,19 @@ object Widgets {
         fun pillDp(isz: Float, ts: Float): Float = if (free >= fullDp(isz, ts) + 10f) fullDp(isz, ts) else if (free >= smallDp(isz, ts) + 10f) smallDp(isz, ts) else 0f
         var hoursDp = 0f
         if (cfg.showHours) {
-            hoursDp = pillDp(hIs, hTs)
+            hoursDp = pillDp(hIsP, hTsP)
             if (hoursDp > 0) free -= hoursDp + 10f
         }
         var extrasRow = false
-        if (!sideExtras && ex.isNotEmpty() && free >= 26f * sEx + 12f) { extrasRow = true; free -= 26f * sEx + 12f }
+        if (!sideExtras && ex.isNotEmpty() && free >= 26f * sExP + 12f) { extrasRow = true; free -= 26f * sExP + 12f }
         var rainDp = 0f
         if (cfg.showRain && hrs24.isNotEmpty()) {
-            val want = if (anyRain) 36f + 40f * sRain else 30f
+            val want = if (anyRain) 36f + 40f * sRainP else 30f
             if (free >= want + 10f) { rainDp = want; free -= want + 10f }
         }
         var daysDp = 0f
         if (cfg.showDays && f.days.isNotEmpty()) {
-            daysDp = pillDp(dIs, dTs)
+            daysDp = pillDp(dIsP, dTsP)
             if (daysDp > 0) free -= daysDp + 10f
         }
 
@@ -516,26 +541,23 @@ object Widgets {
         val tempStr = fmt.temp(cur.temp)
         val leftW = if (gr != null) gr.left - pad - dp(12f) else w - pad * 2 - (if (wDp >= 240) dp(110f) else 0f)
         // quanto è largo il blocco per ogni pixel di altezza (icona e testo crescono insieme)
-        val probeP = p.text(100f * sTemp / sMax * 1.18f, c.ink, true)
-        val widthPerPx = sIcon / sMax + probeP.measureText(tempStr) / dp(100f)
+        val probeP = p.text(100f * sTempP / sMaxP * 1.18f, c.ink, true)
+        val widthPerPx = sIconP / sMaxP + probeP.measureText(tempStr) / dp(100f)
         val maxBlockDp = ((leftW - dp(12f)) / widthPerPx / p.scale).coerceAtLeast(0f)
         // lo spazio che avanza ingrandisce prima icona e temperatura, poi va tra le parti
         if (cfg.showCurrent && free > 0 && blockDp < maxBlockDp) {
-            val grow = minOf(free * 0.75f, baseBlockDp * 0.6f, maxBlockDp - blockDp)
-            if (grow > 0) { blockDp += grow; free -= grow }
+            val more = minOf(free * 0.75f, baseBlockDp * 0.6f, maxBlockDp - blockDp)
+            if (more > 0) { blockDp += more; free -= more }
         }
         val parts = listOf(cfg.showCurrent, hoursDp > 0, extrasRow, rainDp > 0, daysDp > 0).count { it }
         val gap = dp((free / (parts + 1)).coerceIn(0f, 16f))
 
         // --- intestazione: nome, piccola icona dell'ultimo aggiornamento e (se c'è posto) condizione
-        var y = pad + dp(16f) + gap / 2
-        val headerTop = y - dp(16f)
-        val nameP = p.text(16f, c.ink, true)
-        val updP = p.text(10f, if (busy) c.accent else c.inkDim)
-        val updShort = if (busy) "…" else fmt.time(upd)
-        val updW = if (cfg.showUpdated) dp(6f) + dp(12f) + dp(3f) + updP.measureText(updShort) else 0f
-        val nameMax = if (gr != null) leftW else w - pad * 2 - refreshSpace - (if (alertOn) dp(34f) else 0f)
-        val nameTxt = p.fit(nameP, place.name, (nameMax - updW).coerceAtLeast(dp(40f)))
+        var y = pad + dp(nameSpP) + gap / 2
+        val headerTop = y - dp(nameSpP)
+        val nameP = p.text(nameSp, c.ink, true)
+        // con la sovrapposizione il nome non viene tagliato
+        val nameTxt = if (ov) place.name else p.fit(nameP, place.name, (nameMax - updW).coerceAtLeast(dp(40f)))
         cv.drawText(nameTxt, pad, y, nameP)
         if (cfg.showUpdated) {
             val ux = pad + nameP.measureText(nameTxt) + dp(6f)
@@ -543,22 +565,25 @@ object Widgets {
             cv.drawText(updShort, ux + dp(15f), y - dp(2f), updP)
         }
         if (sideExtras) {
-            y += dp(16f)
+            y += dp(subSpP + 4f)
             val sub = "${conditionText(cur.code, cur.isDay)} · ${fmt.temp(today?.tMax ?: Double.NaN)}/${fmt.temp(today?.tMin ?: Double.NaN)}"
-            cv.drawText(p.fit(p.text(12f, c.inkDim), sub, leftW), pad, y, p.text(12f, c.inkDim))
+            val subP = p.text(subSp, c.inkDim)
+            cv.drawText(if (ov) sub else p.fit(subP, sub, leftW), pad, y, subP)
         }
         y += dp(8f) + gap
         if (cfg.showCurrent) {
             val bh = dp(blockDp)
-            var icPx = bh * sIcon / sMax
-            var tsDp = blockDp * 1.18f * sTemp / sMax
-            var tp = p.text(tsDp, c.ink, true)
-            val need = icPx + dp(12f) + tp.measureText(tempStr)
+            var icPx = bh * sIconP / sMaxP
+            var tsDp = blockDp * 1.18f * sTempP / sMaxP
+            val need = icPx + dp(12f) + p.text(tsDp, c.ink, true).measureText(tempStr)
             if (need > leftW && need > 0) {
                 // non entra in larghezza: rimpiccioliscono entrambi nella stessa misura
                 val k = ((leftW - dp(12f)) / (need - dp(12f))).coerceIn(0.3f, 1f)
-                icPx *= k; tsDp *= k; tp = p.text(tsDp, c.ink, true)
+                icPx *= k; tsDp *= k
             }
+            // sovrapposizione: si ingrandiscono dal centro del loro spazio, anche sopra gli altri
+            if (ov) { icPx *= sIcon; tsDp *= sTemp }
+            val tp = p.text(tsDp, c.ink, true)
             val ic = icPx.toInt().coerceAtLeast(1)
             cv.drawBitmap(icon(cur.code, cur.isDay, ic, s.iconSet, c), pad, y + (bh - ic) / 2f, null)
             val r8 = android.graphics.Rect(); tp.getTextBounds("8", 0, 1, r8)
@@ -567,10 +592,10 @@ object Widgets {
             if (gr != null) {
                 // pillole in colonne: tutte larghe uguali, partono dalla stessa riga verticale
                 var top = headerTop; var i = 0
-                for (cap in gr.caps) {
+                gr.caps.forEachIndexed { row, cap ->
                     for (j in 0 until cap) {
                         val (iv, v) = ex[i++]
-                        val x = gr.left + j * (gr.colW + chGapH)
+                        val x = gr.left + gr.offs[row] + j * (gr.colW + chGapH)
                         p.pill(x, top, x + gr.colW, top + chH, c.card2.copy(alpha = c.card2.alpha * maxOf(cfg.opacity, 40) / 100f))
                         drawVector(cv, iv, x + dp(8f), top + (chH - chIc) / 2, chIc, c.accent.toArgb())
                         cv.drawText(p.fit(chPaint, v, gr.colW - chIc - dp(21f)), x + dp(13f) + chIc, top + chH / 2 + chPaint.textSize * 0.35f, chPaint)
@@ -603,7 +628,7 @@ object Widgets {
                 cv.drawText(v, x + dp(14f) + isz, y + chH / 2 + tpe.textSize * 0.35f, tpe)
                 x += cw + dp(6f)
             }
-            y += chH + dp(12f) + gap
+            y += dp(26f * sExP) + dp(12f) + gap
         }
         if (extrasRow) extrasLine()
         closeZone("main", y - gap / 2)
@@ -611,9 +636,8 @@ object Widgets {
         // --- pillole (ore e giorni): etichetta, icona, temperatura, % e mm di pioggia
         val rainBlue = Color(0xFF6CB8FF)
         class PillItem(val label: String, val code: Int, val isDay: Boolean, val temp: String, val prob: Double, val mm: Double)
-        fun pills(items: List<PillItem>, heightDp: Float, highlightFirst: Boolean, isz: Float, ts: Float) {
-            val hh = dp(heightDp)
-            val small = heightDp < fullDp(isz, ts) - 0.5f
+        fun pills(items: List<PillItem>, small: Boolean, highlightFirst: Boolean, isz: Float, ts: Float) {
+            val hh = dp(if (small) smallDp(isz, ts) else fullDp(isz, ts))
             val colDp = (if (small) 46f else 52f) * maxOf(ts, isz * 0.85f, 1f)
             val n = ((w - pad * 2) / dp(colDp)).toInt().coerceIn(3, 12).coerceAtMost(items.size)
             if (n <= 0) return
@@ -644,7 +668,7 @@ object Widgets {
         if (hoursDp > 0) {
             pills(f.hours.take(12).mapIndexed { i, hr ->
                 PillItem(if (i == 0) "Ora" else fmt.hourLabel(hr.time), hr.code, hr.isDay, fmt.temp(if (i == 0) cur.temp else hr.temp), hr.precipProb, hr.precip)
-            }, hoursDp, true, hIs, hTs)
+            }, hoursDp < fullDp(hIsP, hTsP) - 0.5f, true, hIs, hTs)
             y += dp(hoursDp) + dp(10f) + gap
             closeZone("hours", y - gap / 2)
         }
@@ -694,7 +718,7 @@ object Widgets {
                 val name = if (d.date == todayDate) "Oggi"
                     else d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ITALY).replaceFirstChar { it.uppercase() }.trimEnd('.')
                 PillItem(name, d.code, true, fmt.temp(d.tMax), d.precipProb, d.precipSum)
-            }, daysDp, f.days.firstOrNull()?.date == todayDate, dIs, dTs)
+            }, daysDp < fullDp(dIsP, dTsP) - 0.5f, f.days.firstOrNull()?.date == todayDate, dIs, dTs)
             y += dp(daysDp) + dp(10f)
             closeZone("days", h.toFloat())
         }

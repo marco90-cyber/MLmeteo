@@ -20,6 +20,8 @@ data class WidgetCfg(
     val showDays: Boolean = true,
     val showAlert: Boolean = true,
     val showUpdated: Boolean = true,
+    /** Ingrandendo un elemento può andare sopra gli altri invece di farli sparire. */
+    val overlap: Boolean = false,
     val extras: List<String> = listOf("wind", "humidity"),
     /** Opacità dello sfondo, 0..100. */
     val opacity: Int = 100,
@@ -42,6 +44,7 @@ data class WidgetCfg(
     fun toJson(): String = JSONObject().apply {
         put("place", place); put("showCurrent", showCurrent); put("showHours", showHours); put("showRain", showRain)
         put("showDays", showDays); put("showAlert", showAlert); put("showUpdated", showUpdated)
+        put("overlap", overlap)
         put("extras", JSONArray(extras)); put("opacity", opacity); put("colorMode", colorMode); put("customColor", customColor)
         put("textMode", textMode); put("corner", corner)
         put("tapMain", tapMain); put("tapHours", tapHours); put("tapRain", tapRain); put("tapDays", tapDays)
@@ -61,6 +64,7 @@ data class WidgetCfg(
                     showDays = o.optBoolean("showDays", def.showDays),
                     showAlert = o.optBoolean("showAlert", def.showAlert),
                     showUpdated = o.optBoolean("showUpdated", def.showUpdated),
+                    overlap = o.optBoolean("overlap", def.overlap),
                     extras = o.optJSONArray("extras")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: def.extras,
                     opacity = o.optInt("opacity", def.opacity),
                     colorMode = o.optString("colorMode", def.colorMode),
@@ -91,6 +95,7 @@ val WidgetExtras = listOf(
 
 /** Elementi di cui si può cambiare la grandezza. */
 val WidgetSizeKeys = listOf(
+    "name" to "Nome della città",
     "currentIcon" to "Meteo attuale: icona",
     "currentTemp" to "Meteo attuale: temperatura",
     "extras" to "Dati extra",
