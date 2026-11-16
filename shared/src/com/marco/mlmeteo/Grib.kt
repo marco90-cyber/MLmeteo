@@ -33,9 +33,63 @@ object Grib {
         fun align() { pos = (pos + 7) / 8 * 8 }
     }
 
-    private fun smag(v: Long, bytes: Int): Long {
+    /** Intero con segno nel formato GRIB ("sign and magnitude"). */
+    internal fun smag(v: Long, bytes: Int): Long {
         val sign = 1L shl (8 * bytes - 1)
         return if (v and sign != 0L) -(v and (sign - 1)) else v
+    }
+
+    /** Intero senza segno di [n] byte alla posizione [pos]. */
+    internal fun uint(b: ByteArray, pos: Int, n: Int): Long {
+        var v = 0L
+        for (k in 0 until n) v = (v shl 8) or (b[pos + k].toLong() and 0xFF)
+        return v
+    }
+
+    /** Posizione e lunghezza di ogni sezione del messaggio. */
+    internal fun sections(b: ByteArray): Map<Int, Pair<Int, Int>> {
+        var pos = 16
+        val sec = HashMap<Int, Pair<Int, Int>>()
+        while (pos + 5 <= b.size) {
+            if (b[pos] == '7'.code.toByte() && b[pos + 1] == '7'.code.toByte() && b[pos + 2] == '7'.code.toByte()) break
+            val len = uint(b, pos, 4).toInt()
+            if (len <= 0) break
+            sec[b[pos + 4].toInt()] = pos to len
+            pos += len
+        }
+        return sec
+    }
+
+    /** Valori della sezione dati ancora "impacchettati": [value] li converte nell'unità del campo. */
+    internal class Packed(private val raw: LongArray, private val r: Double, private val se: Double, private val sd: Double, val endBit: Long) {
+        val size get() = raw.size
+        fun value(k: Int): Float = ((r + raw[k] * se) * sd).toFloat()
+    }
+
+    /** Legge le sezioni 5 e 7 (compressione e dati), qualunque sia la griglia. */
+    internal fun unpack(b: ByteArray, sec: Map<Int, Pair<Int, Int>>): Packed {
+        val (p5, _) = sec[5] ?: throw IOException("GRIB senza dati")
+        val n = uint(b, p5 + 5, 4).toInt()
+        val tmpl = uint(b, p5 + 9, 2).toInt()
+        val r = ByteBuffer.wrap(b, p5 + 11, 4).order(ByteOrder.BIG_ENDIAN).float.toDouble()
+        val e = smag(uint(b, p5 + 15, 2), 2).toInt()
+        val d = smag(uint(b, p5 + 17, 2), 2).toInt()
+        val nb = b[p5 + 19].toInt() and 0xFF
+        val (p7, l7) = sec[7] ?: throw IOException("GRIB senza dati")
+        val start = p7 + 5
+        val br = Bits(b, start.toLong() * 8)
+        val raw: LongArray = when (tmpl) {
+            0 -> LongArray(n) { if (nb > 0) br.read(nb) else 0L }
+            3 -> complex(b, p5, br, n, nb)
+            42 -> {
+                val flags = b[p5 + 21].toInt() and 0xFF
+                val block = b[p5 + 22].toInt() and 0xFF
+                val rsi = uint(b, p5 + 23, 2).toInt()
+                if (nb == 0) LongArray(n) else aec(b, start, l7 - 5, n, nb, flags, block, rsi)
+            }
+            else -> throw IOException("Compressione GRIB non supportata ($tmpl)")
+        }
+        return Packed(raw, r, 2.0.pow(e), 10.0.pow(-d), br.pos)
     }
 
     /** Primo messaggio GRIB contenuto in [bytes]. */
@@ -46,16 +100,8 @@ object Grib {
     }
 
     fun decode(b: ByteArray): Field {
-        fun u(pos: Int, n: Int): Long { var v = 0L; for (k in 0 until n) v = (v shl 8) or (b[pos + k].toLong() and 0xFF); return v }
-        var pos = 16
-        val sec = HashMap<Int, Pair<Int, Int>>()
-        while (pos + 5 <= b.size) {
-            if (b[pos] == '7'.code.toByte() && b[pos + 1] == '7'.code.toByte() && b[pos + 2] == '7'.code.toByte()) break
-            val len = u(pos, 4).toInt()
-            if (len <= 0) break
-            sec[b[pos + 4].toInt()] = pos to len
-            pos += len
-        }
+        fun u(pos: Int, n: Int) = uint(b, pos, n)
+        val sec = sections(b)
         // --- griglia
         val (p3, _) = sec[3] ?: throw IOException("GRIB senza griglia")
         fun o(k: Int) = p3 + k - 1
@@ -71,31 +117,7 @@ object Grib {
         if (lo1 > 180) lo1 -= 360
         val northFirst = (scan and 0x40) == 0
         // --- valori
-        val (p5, _) = sec[5] ?: throw IOException("GRIB senza dati")
-        val n = u(p5 + 5, 4).toInt()
-        val tmpl = u(p5 + 9, 2).toInt()
-        val r = ByteBuffer.wrap(b, p5 + 11, 4).order(ByteOrder.BIG_ENDIAN).float.toDouble()
-        val e = smag(u(p5 + 15, 2), 2).toInt()
-        val d = smag(u(p5 + 17, 2), 2).toInt()
-        val nb = b[p5 + 19].toInt() and 0xFF
-        val se = 2.0.pow(e)
-        val sd = 10.0.pow(-d)
-        val (p7, l7) = sec[7] ?: throw IOException("GRIB senza dati")
-        val start = p7 + 5
-        val packed: LongArray = when (tmpl) {
-            0 -> {
-                val br = Bits(b, start.toLong() * 8)
-                LongArray(n) { if (nb > 0) br.read(nb) else 0L }
-            }
-            3 -> complex(b, p5, start, n, nb)
-            42 -> {
-                val flags = b[p5 + 21].toInt() and 0xFF
-                val block = b[p5 + 22].toInt() and 0xFF
-                val rsi = u(p5 + 23, 2).toInt()
-                if (nb == 0) LongArray(n) else aec(b, start, l7 - 5, n, nb, flags, block, rsi)
-            }
-            else -> throw IOException("Compressione GRIB non supportata ($tmpl)")
-        }
+        val packed = unpack(b, sec)
         val vals = FloatArray(ni * nj) { Float.NaN }
         // mappa di bit (punti mancanti)
         val bitmap: BooleanArray? = sec[6]?.let { (p6, l6) ->
@@ -108,7 +130,7 @@ object Grib {
         for (idx in 0 until ni * nj) {
             if (bitmap != null && !bitmap[idx]) continue
             if (k >= packed.size) break
-            val v = ((r + packed[k++] * se) * sd).toFloat()
+            val v = packed.value(k++)
             // riordina: righe da sud a nord
             val row = idx / ni
             val col = idx % ni
@@ -119,8 +141,8 @@ object Grib {
         return Field(ni, nj, south, lo1, dj, di, vals)
     }
 
-    private fun complex(b: ByteArray, p5: Int, start: Int, n: Int, nb: Int): LongArray {
-        fun u(pos: Int, len: Int): Long { var v = 0L; for (k in 0 until len) v = (v shl 8) or (b[pos + k].toLong() and 0xFF); return v }
+    private fun complex(b: ByteArray, p5: Int, br: Bits, n: Int, nb: Int): LongArray {
+        fun u(pos: Int, len: Int) = uint(b, pos, len)
         fun q(k: Int) = p5 + k - 1
         val miss = b[q(23)].toInt() and 0xFF
         val ng = u(q(32), 4).toInt()
@@ -133,7 +155,6 @@ object Grib {
         val order = b[q(48)].toInt() and 0xFF
         val nyb = b[q(49)].toInt() and 0xFF
         if (miss != 0) throw IOException("Valori mancanti non supportati")
-        val br = Bits(b, start.toLong() * 8)
         val ival1 = smag(br.read(8 * nyb), nyb)
         val ival2 = if (order == 2) smag(br.read(8 * nyb), nyb) else 0L
         val minsd = smag(br.read(8 * nyb), nyb)

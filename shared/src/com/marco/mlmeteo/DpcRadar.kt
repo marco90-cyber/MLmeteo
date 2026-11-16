@@ -66,7 +66,7 @@ object DpcRadar {
             c.connectTimeout = 15000
             c.readTimeout = 15000
             c.setRequestProperty("Content-Type", "application/json")
-            c.setRequestProperty("User-Agent", "MLMeteo/1.0 (+https://github.com/marco90-cyber/MLmeteo)")
+            c.setRequestProperty("User-Agent", Net.UA)
             c.outputStream.use { it.write(body.toByteArray()) }
             if (c.responseCode !in 200..299) throw IOException("Radar Protezione Civile: errore ${c.responseCode}")
             return c.inputStream.bufferedReader().use { it.readText() }

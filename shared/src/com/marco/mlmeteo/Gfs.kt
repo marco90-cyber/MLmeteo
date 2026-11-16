@@ -9,8 +9,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.LocalDateTime
@@ -43,20 +41,6 @@ object Gfs {
 
     class Data(val run: String, val times: List<LocalDateTime>, val values: List<FloatArray>, val u: List<FloatArray>? = null, val v: List<FloatArray>? = null)
 
-    private fun get(url: String): ByteArray? {
-        val c = URL(url).openConnection() as HttpURLConnection
-        return try {
-            c.connectTimeout = 20000
-            c.readTimeout = 30000
-            c.setRequestProperty("User-Agent", "MLMeteo/1.0 (+https://github.com/marco90-cyber/MLmeteo)")
-            if (c.responseCode != 200) null else c.inputStream.use { it.readBytes() }
-        } catch (e: Exception) {
-            null
-        } finally {
-            c.disconnect()
-        }
-    }
-
     private fun url(run: ZonedDateTime, step: Int, variable: String, level: String): String {
         val d = run.format(DateTimeFormatter.ofPattern("yyyyMMdd"))
         val h = run.format(DateTimeFormatter.ofPattern("HH"))
@@ -68,14 +52,8 @@ object Gfs {
     /** Primo messaggio GRIB del file, decodificato. */
     private fun field(run: ZonedDateTime, step: Int, variable: String, level: String): FloatArray? {
         val u = url(run, step, variable, level)
-        val f = File(cacheDir, "gfs/" + (u.hashCode().toLong() and 0xffffffffL).toString(16) + ".grib")
-        val bytes = if (f.exists() && f.length() > 100) f.readBytes() else {
-            val b = get(u) ?: return null
-            if (b.size < 16 || b[0] != 'G'.code.toByte()) return null
-            f.parentFile?.mkdirs()
-            try { f.writeBytes(b) } catch (e: Exception) { }
-            b
-        }
+        val f = File(cacheDir, "gfs/" + cacheKey(u) + ".grib")
+        val bytes = cachedGrib(f) { Net.getBytes(u, 20000, 30000) } ?: return null
         val len = ByteBuffer.wrap(bytes, 8, 8).order(ByteOrder.BIG_ENDIAN).long.toInt().coerceAtMost(bytes.size)
         val values = try { Grib.decode(bytes.copyOf(len)).values } catch (e: Exception) { return null }
         return if (values.size == NI * NJ) values else null
@@ -138,7 +116,7 @@ object Gfs {
                 val ok = steps.filter { st -> vars.indices.all { out.containsKey("$it/$st") } }
                 if (ok.isEmpty()) throw IOException("GFS non disponibile")
                 withContext(Dispatchers.IO) {
-                    cleanCache(vars.flatMap { (v, l) -> ok.map { st -> (url(run, st, v, l).hashCode().toLong() and 0xffffffffL).toString(16) + ".grib" } }.toSet())
+                    cleanCache(vars.flatMap { (v, l) -> ok.map { st -> cacheKey(url(run, st, v, l)) + ".grib" } }.toSet())
                 }
                 val times = ok.map { run.plusHours(it.toLong()).withZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime() }
                 val runId = run.format(DateTimeFormatter.ofPattern("yyyyMMddHH"))
@@ -164,16 +142,8 @@ object Gfs {
 
     // ------------------------------------------------------------------ disegno (interpolazione morbida)
 
-    fun sample(values: FloatArray, lat: Double, lon: Double): Float {
-        val fy = (lat - SOUTH) / STEP
-        val fx = (lon - WEST) / STEP
-        if (fy < 0 || fx < 0 || fy > NJ - 1 || fx > NI - 1) return Float.NaN
-        val j = fy.toInt().coerceAtMost(NJ - 2); val i = fx.toInt().coerceAtMost(NI - 2)
-        val ty = (fy - j).toFloat(); val tx = (fx - i).toFloat()
-        val a = values[j * NI + i]; val b = values[j * NI + i + 1]
-        val c = values[(j + 1) * NI + i]; val d = values[(j + 1) * NI + i + 1]
-        return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty
-    }
+    fun sample(values: FloatArray, lat: Double, lon: Double): Float =
+        bilinear(values, NI, NJ, (lon - WEST) / STEP, (lat - SOUTH) / STEP)
 
     private const val OUT_W = 1100
     private val OUT_H: Int by lazy {

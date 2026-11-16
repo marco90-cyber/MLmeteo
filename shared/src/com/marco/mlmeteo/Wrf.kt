@@ -9,14 +9,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -61,72 +54,7 @@ object Wrf {
     )
 
     lateinit var cacheDir: File
-    private val offsets = HashMap<String, List<Pair<Long, Long>>>()
-    private val fileNames = HashMap<String, String>()
-
-    // ------------------------------------------------------------------ rete (come ICON-2I)
-
-    private fun runs(): List<String> {
-        val html = Net.get("$BASE/")
-        return Regex("href=\"(\\d{10})/\"").findAll(html).map { it.groupValues[1] }.toList().sorted().reversed()
-    }
-
-    private fun fileUrl(run: String, variable: String): String? {
-        val key = "$run/$variable"
-        fileNames[key]?.let { return it }
-        // "t@850" = cartella t, file del livello 850 hPa
-        val dir = variable.substringBefore('@')
-        val lev = variable.substringAfter('@', "")
-        val html = try { Net.get("$BASE/$run/$dir/") } catch (e: Exception) { return null }
-        val names = Regex("href=\"([^\"]+\\.grib)\"").findAll(html).map { it.groupValues[1] }.toList()
-        val name = (if (lev.isEmpty()) names.firstOrNull() else names.firstOrNull { it.endsWith("isobaricInhPa-$lev.grib") }) ?: return null
-        return "$BASE/$run/$dir/$name".also { fileNames[key] = it }
-    }
-
-    private fun range(url: String, from: Long, len: Long): ByteArray {
-        val c = URL(url).openConnection() as HttpURLConnection
-        try {
-            c.connectTimeout = 20000
-            c.readTimeout = 30000
-            c.setRequestProperty("User-Agent", "MLMeteo/1.0 (+https://github.com/marco90-cyber/MLmeteo)")
-            c.setRequestProperty("Range", "bytes=$from-${from + len - 1}")
-            if (c.responseCode != 206 && c.responseCode != 200) throw IOException("WRF: errore ${c.responseCode}")
-            return c.inputStream.use { it.readBytes() }.let { if (it.size > len) it.copyOf(len.toInt()) else it }
-        } finally {
-            c.disconnect()
-        }
-    }
-
-    private fun messages(url: String): List<Pair<Long, Long>> {
-        offsets[url]?.let { return it }
-        val out = ArrayList<Pair<Long, Long>>()
-        var off = 0L
-        while (out.size < 80) {
-            val head = try { range(url, off, 16) } catch (e: Exception) { break }
-            if (head.size < 16 || head[0] != 'G'.code.toByte() || head[1] != 'R'.code.toByte()) break
-            val len = ByteBuffer.wrap(head, 8, 8).order(ByteOrder.BIG_ENDIAN).long
-            out += off to len
-            off += len
-        }
-        if (out.isNotEmpty()) offsets[url] = out
-        return out
-    }
-
-    private fun messageBytes(url: String, index: Int): ByteArray? {
-        val (off, len) = messages(url).getOrNull(index) ?: return null
-        val name = "w" + (url.hashCode().toLong() and 0xffffffffL).toString(16) + "_$index.grib"
-        val f = File(cacheDir, "wrf/$name")
-        if (f.exists() && f.length() == len) return f.readBytes()
-        val b = range(url, off, len)
-        f.parentFile?.mkdirs()
-        try { f.writeBytes(b) } catch (e: Exception) { }
-        return b
-    }
-
-    private fun cleanCache(keepUrls: Set<String>) {
-        val keep = keepUrls.map { "w" + (it.hashCode().toLong() and 0xffffffffL).toString(16) }.toSet()
-        File(cacheDir, "wrf").listFiles()?.forEach { if (it.name.substringBefore('_') !in keep) it.delete() }
-    }
+    private val hub = Meteohub(BASE, "WRF", "wrf", "w", 80) { cacheDir }
 
     // ------------------------------------------------------------------ GRIB2
 
@@ -135,103 +63,27 @@ object Wrf {
         val dx: Double, val dy: Double, val latin1: Double, val latin2: Double,
     )
 
-    private fun smag(v: Long, bytes: Int): Long {
-        val sign = 1L shl (8 * bytes - 1)
-        return if (v and sign != 0L) -(v and (sign - 1)) else v
-    }
-
     private class Decoded(val grid: Grid, val values: FloatArray)
 
+    /** Griglia di Lambert del WRF; i valori li spacchetta il lettore GRIB comune. */
     private fun decode(b: ByteArray): Decoded {
-        fun u(pos: Int, n: Int): Long { var v = 0L; for (k in 0 until n) v = (v shl 8) or (b[pos + k].toLong() and 0xFF); return v }
-        var pos = 16
-        val sec = HashMap<Int, Pair<Int, Int>>()
-        while (pos + 5 <= b.size) {
-            if (b[pos] == '7'.code.toByte() && b[pos + 1] == '7'.code.toByte() && b[pos + 2] == '7'.code.toByte()) break
-            val len = u(pos, 4).toInt()
-            if (len <= 0) break
-            sec[b[pos + 4].toInt()] = pos to len
-            pos += len
-        }
+        val sec = Grib.sections(b)
         val (p3, _) = sec[3] ?: throw IOException("GRIB senza griglia")
+        fun u(pos: Int, n: Int) = Grib.uint(b, pos, n)
         fun o(k: Int) = p3 + k - 1
         if (u(o(13), 2).toInt() != 30) throw IOException("Griglia WRF non riconosciuta")
         val grid = Grid(
             nx = u(o(31), 4).toInt(), ny = u(o(35), 4).toInt(),
-            la1 = smag(u(o(39), 4), 4) / 1e6, lo1 = u(o(43), 4) / 1e6,
-            lad = smag(u(o(48), 4), 4) / 1e6, lov = u(o(52), 4) / 1e6,
+            la1 = Grib.smag(u(o(39), 4), 4) / 1e6, lo1 = u(o(43), 4) / 1e6,
+            lad = Grib.smag(u(o(48), 4), 4) / 1e6, lov = u(o(52), 4) / 1e6,
             dx = u(o(56), 4) / 1e3, dy = u(o(60), 4) / 1e3,
-            latin1 = smag(u(o(66), 4), 4) / 1e6, latin2 = smag(u(o(70), 4), 4) / 1e6,
+            latin1 = Grib.smag(u(o(66), 4), 4) / 1e6, latin2 = Grib.smag(u(o(70), 4), 4) / 1e6,
         )
-        val (p5, _) = sec[5] ?: throw IOException("GRIB senza dati")
-        fun q(k: Int) = p5 + k - 1
-        val n = u(p5 + 5, 4).toInt()
-        val tmpl = u(p5 + 9, 2).toInt()
-        val r = ByteBuffer.wrap(b, p5 + 11, 4).order(ByteOrder.BIG_ENDIAN).float.toDouble()
-        val e = smag(u(p5 + 15, 2), 2).toInt()
-        val d = smag(u(p5 + 17, 2), 2).toInt()
-        val nb = b[p5 + 19].toInt() and 0xFF
-        val se = 2.0.pow(e)
-        val sd = 10.0.pow(-d)
-        val out = FloatArray(grid.nx * grid.ny)
+        val packed = Grib.unpack(b, sec)
         val (p7, l7) = sec[7] ?: throw IOException("GRIB senza dati")
-        val start = p7 + 5
-        var bit = start.toLong() * 8
-        fun rb(nbits: Int): Long {
-            var v = 0L
-            for (k in 0 until nbits) {
-                val byte = b[(bit shr 3).toInt()].toInt()
-                v = (v shl 1) or ((byte shr (7 - (bit and 7).toInt())) and 1).toLong()
-                bit++
-            }
-            return v
-        }
-        fun align() { bit = (bit + 7) / 8 * 8 }
-        when (tmpl) {
-            0 -> {
-                for (i in 0 until n.coerceAtMost(out.size)) out[i] = ((r + (if (nb > 0) rb(nb) else 0L) * se) * sd).toFloat()
-            }
-            3 -> {
-                val miss = b[q(23)].toInt() and 0xFF
-                val ng = u(q(32), 4).toInt()
-                val wref = b[q(36)].toInt() and 0xFF
-                val wbits = b[q(37)].toInt() and 0xFF
-                val lref = u(q(38), 4).toInt()
-                val linc = b[q(42)].toInt() and 0xFF
-                val llast = u(q(43), 4).toInt()
-                val lbits = b[q(47)].toInt() and 0xFF
-                val order = b[q(48)].toInt() and 0xFF
-                val nyb = b[q(49)].toInt() and 0xFF
-                if (miss != 0) throw IOException("Valori mancanti non supportati")
-                val ival1 = smag(rb(8 * nyb), nyb)
-                val ival2 = if (order == 2) smag(rb(8 * nyb), nyb) else 0L
-                val minsd = smag(rb(8 * nyb), nyb)
-                val refs = LongArray(ng) { rb(nb) }; align()
-                val widths = IntArray(ng) { rb(wbits).toInt() + wref }; align()
-                val lens = IntArray(ng) { rb(lbits).toInt() * linc + lref }; align()
-                lens[ng - 1] = llast
-                val x = LongArray(n)
-                var k = 0
-                for (g in 0 until ng) {
-                    val w = widths[g]
-                    val ref = refs[g]
-                    for (t in 0 until lens[g]) {
-                        if (k >= n) break
-                        x[k++] = ref + if (w > 0) rb(w) else 0L
-                    }
-                }
-                if (n > 0) x[0] = ival1
-                if (order == 2) {
-                    if (n > 1) x[1] = ival2
-                    for (i in 2 until n) x[i] = x[i] + minsd + 2 * x[i - 1] - x[i - 2]
-                } else {
-                    for (i in 1 until n) x[i] = x[i] + minsd + x[i - 1]
-                }
-                for (i in 0 until n.coerceAtMost(out.size)) out[i] = ((r + x[i] * se) * sd).toFloat()
-            }
-            else -> throw IOException("Compressione WRF non supportata ($tmpl)")
-        }
-        if (bit > (p7 + l7).toLong() * 8 + 8) throw IOException("Dati WRF incompleti")
+        if (packed.endBit > (p7 + l7).toLong() * 8 + 8) throw IOException("Dati WRF incompleti")
+        val out = FloatArray(grid.nx * grid.ny)
+        for (i in 0 until packed.size.coerceAtMost(out.size)) out[i] = packed.value(i)
         return Decoded(grid, out)
     }
 
@@ -289,11 +141,6 @@ object Wrf {
 
     // ------------------------------------------------------------------ caricamento
 
-    private fun runTime(run: String): LocalDateTime {
-        val utc = LocalDateTime.parse(run, DateTimeFormatter.ofPattern("yyyyMMddHH"))
-        return utc.atOffset(ZoneOffset.UTC).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
-    }
-
     val layers = listOf(MapLayer.RAIN, MapLayer.TEMP, MapLayer.WIND, MapLayer.GUST, MapLayer.CLOUD, MapLayer.VIS,
         MapLayer.PRESSURE, MapLayer.CAPE, MapLayer.T850)
 
@@ -310,13 +157,13 @@ object Wrf {
             MapLayer.T850 -> listOf("t@850")
             else -> throw IOException("Strato non disponibile con WRF")
         }
-        val runList = withContext(Dispatchers.IO) { runs() }
+        val runList = withContext(Dispatchers.IO) { hub.runs() }
         var lastError: Exception? = null
         for (run in runList.take(2)) {
             try {
-                val urls = withContext(Dispatchers.IO) { vars.map { fileUrl(run, it) ?: throw IOException("File $it mancante") } }
-                val available = withContext(Dispatchers.IO) { urls.minOf { messages(it).size } }
-                val rt = runTime(run)
+                val urls = withContext(Dispatchers.IO) { vars.map { hub.fileUrl(run, it) ?: throw IOException("File $it mancante") } }
+                val available = withContext(Dispatchers.IO) { urls.minOf { hub.messages(it).size } }
+                val rt = Meteohub.runTime(run)
                 val first = (java.time.Duration.between(rt, LocalDateTime.now()).toMinutes() / 60).toInt().coerceAtLeast(0)
                 if (available < first + 3) throw IOException("Corsa $run incompleta")
                 val last = (first + hours).coerceAtMost(available - 1)
@@ -330,7 +177,7 @@ object Wrf {
                 for (chunk in jobs.chunked(3)) {
                     chunk.map { (vi, url, s) ->
                         async(Dispatchers.IO) {
-                            val bytes = messageBytes(url, s) ?: throw IOException("Dato mancante")
+                            val bytes = hub.messageBytes(url, s) ?: throw IOException("Dato mancante")
                             val dec = withContext(Dispatchers.Default) { decode(bytes) }
                             val tf: (Float) -> Float = when (layer) {
                                 MapLayer.TEMP, MapLayer.T850 -> { x -> x - 273.15f }
@@ -345,7 +192,7 @@ object Wrf {
                         }
                     }.awaitAll()
                 }
-                withContext(Dispatchers.IO) { cleanCache(urls.toSet()) }
+                withContext(Dispatchers.IO) { hub.cleanCache(urls.toSet()) }
                 val times = steps.map { rt.plusHours(it.toLong()) }
                 fun f(vi: Int, s: Int) = raw["$vi/$s"]!!
                 val data = withContext(Dispatchers.Default) {

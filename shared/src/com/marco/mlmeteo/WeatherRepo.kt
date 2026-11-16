@@ -19,9 +19,9 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.abs
 
-private const val UA = "MLMeteo/1.0 (+https://github.com/marco90-cyber/MLmeteo)"
-
 object Net {
+    const val UA = "MLMeteo/1.0 (+https://github.com/marco90-cyber/MLmeteo)"
+
     fun get(url: String, timeoutMs: Int = 15000): String {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
@@ -42,19 +42,28 @@ object Net {
         }
     }
 
-    fun getBytes(url: String, timeoutMs: Int = 15000): ByteArray? {
+    /**
+     * Scarica dei byte. Con [range] (inizio, lunghezza) chiede al server solo quel pezzo del file.
+     * Lancia un'eccezione se la richiesta non riesce.
+     */
+    fun fetch(url: String, timeoutMs: Int = 15000, readMs: Int = timeoutMs, range: Pair<Long, Long>? = null): ByteArray {
         val c = URL(url).openConnection() as HttpURLConnection
-        return try {
+        try {
             c.connectTimeout = timeoutMs
-            c.readTimeout = timeoutMs
+            c.readTimeout = readMs
             c.setRequestProperty("User-Agent", UA)
-            if (c.responseCode in 200..299) c.inputStream.use { it.readBytes() } else null
-        } catch (e: Exception) {
-            null
+            if (range != null) c.setRequestProperty("Range", "bytes=${range.first}-${range.first + range.second - 1}")
+            val code = c.responseCode
+            if (code !in 200..299) throw IOException("Errore HTTP $code")
+            return c.inputStream.use { it.readBytes() }
         } finally {
             c.disconnect()
         }
     }
+
+    /** Come [fetch], ma restituisce null se la richiesta non riesce. */
+    fun getBytes(url: String, timeoutMs: Int = 15000, readMs: Int = timeoutMs, range: Pair<Long, Long>? = null): ByteArray? =
+        try { fetch(url, timeoutMs, readMs, range) } catch (e: Exception) { null }
 }
 
 private fun JSONArray.d(i: Int): Double = if (i < length() && !isNull(i)) optDouble(i) else Double.NaN

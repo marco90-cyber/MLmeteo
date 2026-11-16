@@ -10,8 +10,6 @@ import kotlinx.coroutines.withContext
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -136,20 +134,7 @@ private const val CROP_N = 50.0
 private const val CROP_W = 2.0
 private const val CROP_E = 24.0
 
-private fun httpGet(url: String, range: Pair<Long, Long>? = null): ByteArray? {
-    val c = URL(url).openConnection() as HttpURLConnection
-    return try {
-        c.connectTimeout = 20000
-        c.readTimeout = 40000
-        c.setRequestProperty("User-Agent", "MLMeteo/1.0 (+https://github.com/marco90-cyber/MLmeteo)")
-        if (range != null) c.setRequestProperty("Range", "bytes=${range.first}-${range.first + range.second - 1}")
-        if (c.responseCode != 200 && c.responseCode != 206) null else c.inputStream.use { it.readBytes() }
-    } catch (e: Exception) {
-        null
-    } finally {
-        c.disconnect()
-    }
-}
+private fun httpGet(url: String, range: Pair<Long, Long>? = null): ByteArray? = Net.getBytes(url, 20000, 40000, range)
 
 private fun localTime(utc: ZonedDateTime): LocalDateTime = utc.withZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
 
@@ -216,20 +201,15 @@ class Dwd(private val model: String) {
         else "https://opendata.dwd.de/weather/nwp/icon-d2/grib/$hh/$v/icon-d2_germany_regular-lat-lon_single-level_${r}_${s}_2d_$v.grib2.bz2"
     }
 
-    private fun key(u: String) = (u.hashCode().toLong() and 0xffffffffL).toString(16) + ".grib"
+    private fun key(u: String) = cacheKey(u) + ".grib"
 
     /** Scarica (o legge dalla cache) e decodifica il campo, ritagliato sull'area dell'Italia. */
     private fun field(run: ZonedDateTime, step: Int, v: String): Grib.Field? {
         val u = url(run, step, v)
         val f = File(cacheDir, "$model/" + key(u))
-        val bytes = if (f.exists() && f.length() > 100) f.readBytes() else {
-            val bz = httpGet(u) ?: return null
-            val raw = try { BZip2CompressorInputStream(bz.inputStream()).use { it.readBytes() } } catch (e: Exception) { return null }
-            if (raw.size < 16 || raw[0] != 'G'.code.toByte()) return null
-            f.parentFile?.mkdirs()
-            try { f.writeBytes(raw) } catch (e: Exception) { }
-            raw
-        }
+        val bytes = cachedGrib(f) {
+            httpGet(u)?.let { bz -> try { BZip2CompressorInputStream(bz.inputStream()).use { it.readBytes() } } catch (e: Exception) { null } }
+        } ?: return null
         val full = try { Grib.decode(Grib.first(bytes)) } catch (e: Exception) { return null }
         return if (eu) Grib.crop(full, CROP_S, CROP_N, CROP_W, CROP_E)
         else Grib.crop(full, full.south, minOf(full.south + full.dlat * (full.nj - 1), 50.0), maxOf(full.west, 2.0), full.west + full.dlon * (full.ni - 1))
@@ -369,21 +349,17 @@ object Ecmwf {
 
     private fun field(run: ZonedDateTime, step: Int, v: String): Grib.Field? {
         val (param, lev) = if (v.contains('@')) v.split('@').let { it[0] to it[1] } else v to null
-        val name = (base(run, step) + v).hashCode().toLong().and(0xffffffffL).toString(16) + ".grib"
+        val name = cacheKey(base(run, step) + v) + ".grib"
         val f = File(cacheDir, "ecmwf/$name")
-        val bytes = if (f.exists() && f.length() > 100) f.readBytes() else {
+        val bytes = cachedGrib(f) {
             val idx = index(run, step) ?: return null
             val line = idx.firstOrNull { l ->
                 jsonStr(l, "param") == param && (if (lev == null) jsonStr(l, "levtype") == "sfc" else jsonStr(l, "levelist") == lev)
             } ?: return null
             val off = jsonNum(line, "_offset") ?: return null
             val len = jsonNum(line, "_length") ?: return null
-            val b = httpGet(base(run, step) + ".grib2", off to len) ?: return null
-            if (b.size < 16 || b[0] != 'G'.code.toByte()) return null
-            f.parentFile?.mkdirs()
-            try { f.writeBytes(b) } catch (e: Exception) { }
-            b
-        }
+            httpGet(base(run, step) + ".grib2", off to len)
+        } ?: return null
         val full = try { Grib.decode(Grib.first(bytes)) } catch (e: Exception) { return null }
         return Grib.crop(full, CROP_S, CROP_N, CROP_W, CROP_E)
     }

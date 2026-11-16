@@ -11,15 +11,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.time.Instant
 import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -55,78 +49,11 @@ object Icon2i {
 
     lateinit var cacheDir: File
 
-    private val offsets = HashMap<String, List<Pair<Long, Long>>>()
-    private val fileNames = HashMap<String, String>()
-
-    // ------------------------------------------------------------------ rete
-
-    private fun runs(): List<String> {
-        val html = Net.get("$BASE/")
-        return Regex("href=\"(\\d{10})/\"").findAll(html).map { it.groupValues[1] }.toList().sorted().reversed()
-    }
-
-    private fun fileUrl(run: String, variable: String): String? {
-        val key = "$run/$variable"
-        fileNames[key]?.let { return it }
-        // "T@850" = cartella T, file del livello 850 hPa
-        val dir = variable.substringBefore('@')
-        val lev = variable.substringAfter('@', "")
-        val html = try { Net.get("$BASE/$run/$dir/") } catch (e: Exception) { return null }
-        val names = Regex("href=\"([^\"]+\\.grib)\"").findAll(html).map { it.groupValues[1] }.toList()
-        val name = (if (lev.isEmpty()) names.firstOrNull() else names.firstOrNull { it.endsWith("isobaricInhPa-$lev.grib") }) ?: return null
-        val url = "$BASE/$run/$dir/$name"
-        fileNames[key] = url
-        return url
-    }
-
-    private fun range(url: String, from: Long, len: Long): ByteArray {
-        val c = URL(url).openConnection() as HttpURLConnection
-        try {
-            c.connectTimeout = 20000
-            c.readTimeout = 30000
-            c.setRequestProperty("User-Agent", "MLMeteo/1.0 (+https://github.com/marco90-cyber/MLmeteo)")
-            c.setRequestProperty("Range", "bytes=$from-${from + len - 1}")
-            if (c.responseCode != 206 && c.responseCode != 200) throw IOException("ICON-2I: errore ${c.responseCode}")
-            return c.inputStream.use { it.readBytes() }.let { if (it.size > len) it.copyOf(len.toInt()) else it }
-        } finally {
-            c.disconnect()
-        }
-    }
-
-    /** Posizione (inizio, lunghezza) di ogni messaggio GRIB nel file: un messaggio per ora. */
-    private fun messages(url: String): List<Pair<Long, Long>> {
-        offsets[url]?.let { return it }
-        val out = ArrayList<Pair<Long, Long>>()
-        var off = 0L
-        while (out.size < 40) {
-            val head = try { range(url, off, 16) } catch (e: Exception) { break }
-            if (head.size < 16 || head[0] != 'G'.code.toByte() || head[1] != 'R'.code.toByte()) break
-            val len = ByteBuffer.wrap(head, 8, 8).order(ByteOrder.BIG_ENDIAN).long
-            out += off to len
-            off += len
-        }
-        if (out.isNotEmpty()) offsets[url] = out
-        return out
-    }
+    private val hub = Meteohub(BASE, "ICON-2I", "icon2i", "", 40) { cacheDir }
 
     private fun message(url: String, index: Int): FloatArray? {
-        val msgs = messages(url)
-        val (off, len) = msgs.getOrNull(index) ?: return null
-        val name = (url.hashCode().toLong() and 0xffffffffL).toString(16) + "_$index.grib"
-        val f = File(cacheDir, "icon2i/$name")
-        val bytes = if (f.exists() && f.length() == len) f.readBytes() else {
-            val b = range(url, off, len)
-            f.parentFile?.mkdirs()
-            try { f.writeBytes(b) } catch (e: Exception) { }
-            b
-        }
+        val bytes = hub.messageBytes(url, index) ?: return null
         return try { Grib.decode(Grib.first(bytes)).values.takeIf { it.size == NI * NJ } } catch (e: Exception) { decode(bytes) }
-    }
-
-    /** Toglie dalla cache i file di corse vecchie. */
-    private fun cleanCache(keepUrls: Set<String>) {
-        val keep = keepUrls.map { (it.hashCode().toLong() and 0xffffffffL).toString(16) }.toSet()
-        File(cacheDir, "icon2i").listFiles()?.forEach { if (it.name.substringBefore('_') !in keep) it.delete() }
     }
 
     // ------------------------------------------------------------------ GRIB2 (simple packing)
@@ -193,11 +120,6 @@ object Icon2i {
 
     // ------------------------------------------------------------------ caricamento strati
 
-    private fun runTime(run: String): LocalDateTime {
-        val utc = LocalDateTime.parse(run, DateTimeFormatter.ofPattern("yyyyMMddHH"))
-        return utc.atOffset(ZoneOffset.UTC).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
-    }
-
     /**
      * Scarica lo strato per le prossime [hours] ore.
      * Usa l'ultima corsa disponibile; se non è ancora completa passa alla precedente.
@@ -222,14 +144,14 @@ object Icon2i {
             else -> throw IOException("Strato non disponibile con ICON-2I")
         }
         val accumulated = layer == MapLayer.RAIN || layer == MapLayer.SNOW
-        val runList = withContext(Dispatchers.IO) { runs() }
+        val runList = withContext(Dispatchers.IO) { hub.runs() }
         var lastError: Exception? = null
         for (run in runList.take(3)) {
             try {
-                val urls = withContext(Dispatchers.IO) { vars.map { v -> fileUrl(run, v) ?: throw IOException("File $v mancante") } }
-                val counts = withContext(Dispatchers.IO) { urls.map { messages(it).size } }
+                val urls = withContext(Dispatchers.IO) { vars.map { v -> hub.fileUrl(run, v) ?: throw IOException("File $v mancante") } }
+                val counts = withContext(Dispatchers.IO) { urls.map { hub.messages(it).size } }
                 val available = counts.minOrNull() ?: 0
-                val rt = runTime(run)
+                val rt = Meteohub.runTime(run)
                 val now = LocalDateTime.now()
                 val first = (java.time.Duration.between(rt, now).toMinutes() / 60.0).let { kotlin.math.floor(it).toInt() }.coerceAtLeast(0)
                 if (available < first + 3) throw IOException("Corsa $run incompleta")
@@ -250,7 +172,7 @@ object Icon2i {
                         }
                     }.awaitAll()
                 }
-                withContext(Dispatchers.IO) { cleanCache(urls.toSet()) }
+                withContext(Dispatchers.IO) { hub.cleanCache(urls.toSet()) }
                 val times = steps.map { rt.plusHours(it.toLong()) }
                 val result = withContext(Dispatchers.Default) {
                     fun f(vi: Int, s: Int) = fields["$vi/$s"]!!
@@ -320,16 +242,8 @@ object Icon2i {
     }
 
     /** Valore nel punto (lat, lon), interpolato. */
-    fun sample(values: FloatArray, lat: Double, lon: Double): Float {
-        val fy = (lat - LAT0) / DLAT
-        val fx = (lon - LON0) / DLON
-        if (fy < 0 || fx < 0 || fy > NJ - 1 || fx > NI - 1) return Float.NaN
-        val j = fy.toInt().coerceAtMost(NJ - 2); val i = fx.toInt().coerceAtMost(NI - 2)
-        val ty = (fy - j).toFloat(); val tx = (fx - i).toFloat()
-        val a = values[j * NI + i]; val b = values[j * NI + i + 1]
-        val c = values[(j + 1) * NI + i]; val d = values[(j + 1) * NI + i + 1]
-        return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty
-    }
+    fun sample(values: FloatArray, lat: Double, lon: Double): Float =
+        bilinear(values, NI, NJ, (lon - LON0) / DLON, (lat - LAT0) / DLAT)
 }
 
 fun colorAt(v: Double, stops: List<Pair<Double, Color>>): Color {
