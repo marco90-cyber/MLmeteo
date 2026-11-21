@@ -138,7 +138,9 @@ object AppState {
         scope.launch {
             try {
                 val t0 = System.currentTimeMillis()
-                val f = WeatherRepo.forecast(p, source)
+                // rete non ancora pronta all'avvio: un secondo tentativo dopo qualche secondo
+                val f = try { WeatherRepo.forecast(p, source) }
+                    catch (e: java.io.IOException) { kotlinx.coroutines.delay(4000); WeatherRepo.forecast(p, source) }
                 AppLog.i("Previsione ${p.name} (${source.id}) in ${System.currentTimeMillis() - t0} ms")
                 forecasts[p.id] = f
                 errors.remove(p.id)

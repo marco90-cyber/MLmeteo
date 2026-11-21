@@ -86,7 +86,17 @@ object Background {
 
 /** Ogni 30–180 minuti: aggiorna previsioni, allerte, widget e notifiche. */
 class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    companion object {
+        /** Un solo aggiornamento alla volta: periodico e tasto ⟳ del widget non scaricano più gli stessi dati in parallelo. */
+        private val running = kotlinx.coroutines.sync.Mutex()
+    }
+
     override suspend fun doWork(): Result {
+        if (!running.tryLock()) return Result.success()
+        try { return update() } finally { running.unlock() }
+    }
+
+    private suspend fun update(): Result {
         val ctx = applicationContext
         AppLog.init(ctx)
         AppLog.d("Aggiornamento in background")
@@ -106,6 +116,8 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 val f = WeatherRepo.forecast(p, source)
                 ForecastStore.save(ctx, p.id, f)
                 if (p.id == main.id) Notify.statusBar(ctx, p, f, s)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // lavoro interrotto dal sistema: non è un errore, si riprova al prossimo giro
             } catch (e: Exception) { AppLog.e("Background: previsione ${p.name} non riuscita", e) }
         }
         // allerte e qualità dell'aria per i widget, radar per il widget radar
