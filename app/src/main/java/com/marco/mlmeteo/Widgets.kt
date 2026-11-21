@@ -399,7 +399,6 @@ object Widgets {
             return Rendered(p.bmp, listOf("main" to hDp.toFloat()))
         }
         val cur = f.current
-        val today = f.days.firstOrNull()
         val upd = Instant.ofEpochMilli(f.fetchedAt).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val updTxt = if (busy) "Aggiornamento…" else "Agg. ${fmt.time(upd)}"
         val zones = ArrayList<Pair<String, Float>>()
@@ -434,11 +433,11 @@ object Widgets {
                 avail -= exN * dp(84f)
             }
             if (avail > dp(60f)) {
-                val nameP = p.text(13f, c.ink, true)
+                val nameP = p.text(13f * cfg.size("name"), c.ink, true)
                 cv.drawText(p.fit(nameP, place.name, avail), x, base - dp(tSize * 0.45f), nameP)
-                val sub = if (wDp >= 240 && exN == 0) "${conditionText(cur.code, cur.isDay)} · ${fmt.temp(today?.tMax ?: Double.NaN)}/${fmt.temp(today?.tMin ?: Double.NaN)}"
-                    else conditionText(cur.code, cur.isDay)
-                cv.drawText(p.fit(p.text(12f, c.inkDim), sub, avail), x, base, p.text(12f, c.inkDim))
+                val sub = conditionText(cur.code, cur.isDay)
+                val subP0 = p.text(12f * cfg.size("condition"), c.inkDim)
+                cv.drawText(p.fit(subP0, sub, avail), x, base, subP0)
             }
             if (cfg.showUpdated && refreshSpace > 0 && wDp >= 200) cv.drawText(updTxt, w - pad, h - dp(10f), p.text(10f, c.inkDim, align = Paint.Align.RIGHT))
             return Rendered(p.bmp, listOf("main" to hDp.toFloat()))
@@ -459,6 +458,7 @@ object Widgets {
         val hIs = cfg.size("hoursIcon"); val hTs = cfg.size("hoursText"); val dIs = cfg.size("daysIcon"); val dTs = cfg.size("daysText")
         val hIsP = pl("hoursIcon"); val hTsP = pl("hoursText"); val dIsP = pl("daysIcon"); val dTsP = pl("daysText")
         val sName = cfg.size("name"); val sNameP = pl("name")
+        val sCond = cfg.size("condition"); val sCondP = pl("condition")
         val baseBlockDp = (if (hDp < 170) 52f else 64f) * sMaxP
 
         // dati extra accanto a nome e temperatura: pillole tutte uguali, in colonne allineate a destra
@@ -505,7 +505,7 @@ object Widgets {
         val autoName = (16f * (nameMax - updW) / name16).coerceIn(16f, 16f * 1.4f)
         val nameSp = autoName * sName; val nameSpP = autoName * sNameP
         val grow = nameSpP / 16f
-        val subSp = 12f * (1f + (nameSp / 16f - 1f) * 0.5f); val subSpP = 12f * (1f + (grow - 1f) * 0.5f)
+        val subSp = 12f * (1f + (nameSp / 16f - 1f) * 0.5f) * sCond; val subSpP = 12f * (1f + (grow - 1f) * 0.5f) * sCondP
         val headerDp = nameSpP + (if (sideExtras) subSpP + 4f else 0f) + 8f
         // il blocco icona + temperatura è alto almeno quanto le pillole a destra
         var blockDp = when {
@@ -567,7 +567,7 @@ object Widgets {
         }
         if (sideExtras) {
             y += dp(subSpP + 4f)
-            val sub = "${conditionText(cur.code, cur.isDay)} · ${fmt.temp(today?.tMax ?: Double.NaN)}/${fmt.temp(today?.tMin ?: Double.NaN)}"
+            val sub = conditionText(cur.code, cur.isDay)
             val subP = p.text(subSp, c.inkDim)
             cv.drawText(if (ov) sub else p.fit(subP, sub, leftW), pad, y, subP)
         }
@@ -607,9 +607,9 @@ object Widgets {
                 val tx = tX + tp.measureText(tempStr) + dp(14f)
                 val availR = w - tx - pad
                 if (availR > dp(70f)) {
-                    cv.drawText(p.fit(p.text(14f, c.ink), conditionText(cur.code, cur.isDay), availR), tx, y + bh / 2f - dp(3f), p.text(14f, c.ink))
-                    cv.drawText(p.fit(p.text(12f, c.inkDim), "Max ${fmt.temp(today?.tMax ?: Double.NaN)} · Min ${fmt.temp(today?.tMin ?: Double.NaN)}", availR),
-                        tx, y + bh / 2f + dp(14f), p.text(12f, c.inkDim))
+                    val condP = p.text(14f * sCond, c.ink)
+                    cv.drawText(if (ov) conditionText(cur.code, cur.isDay) else p.fit(condP, conditionText(cur.code, cur.isDay), availR),
+                        tx, y + bh / 2f + condP.textSize * 0.35f, condP)
                 }
             }
             y += bh + dp(10f) + gap

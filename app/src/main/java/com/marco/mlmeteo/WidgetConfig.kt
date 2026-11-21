@@ -40,7 +40,7 @@ data class WidgetCfg(
 ) {
     fun size(key: String): Float =
         // i widget di prima avevano una sola grandezza ("current") per icona e temperatura
-        (sizes[key] ?: (if (key.startsWith("current")) sizes["current"] else null) ?: 100).coerceIn(60, 160) / 100f
+        (sizes[key] ?: (if (key.startsWith("current")) sizes["current"] else null) ?: 100).coerceIn(50, 200) / 100f
     fun toJson(): String = JSONObject().apply {
         put("place", place); put("showCurrent", showCurrent); put("showHours", showHours); put("showRain", showRain)
         put("showDays", showDays); put("showAlert", showAlert); put("showUpdated", showUpdated)
@@ -95,7 +95,8 @@ val WidgetExtras = listOf(
 
 /** Elementi di cui si può cambiare la grandezza. */
 val WidgetSizeKeys = listOf(
-    "name" to "Nome della città",
+    "name" to "Località",
+    "condition" to "Descrizione del tempo",
     "currentIcon" to "Meteo attuale: icona",
     "currentTemp" to "Meteo attuale: temperatura",
     "extras" to "Dati extra",

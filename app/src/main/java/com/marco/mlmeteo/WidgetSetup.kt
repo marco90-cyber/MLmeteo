@@ -278,7 +278,7 @@ private fun SizeStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
     val shown = WidgetSizeKeys.filter { (k, _) ->
         when (k) {
             "name" -> true
-            "currentIcon", "currentTemp" -> cfg.showCurrent
+            "currentIcon", "currentTemp", "condition" -> cfg.showCurrent
             "extras" -> cfg.extras.isNotEmpty()
             "hoursIcon", "hoursText" -> cfg.showHours
             "rain" -> cfg.showRain
@@ -293,7 +293,7 @@ private fun SizeStep(cfg: WidgetCfg, set: (WidgetCfg) -> Unit) {
                 Text("$v%", color = c.inkDim, fontSize = 14.sp)
             }
             Slider(
-                value = v.toFloat(), valueRange = 70f..150f,
+                value = v.toFloat(), valueRange = 50f..200f,
                 onValueChange = { x -> set(cfg.copy(sizes = cfg.sizes + (key to ((x / 5).roundToInt() * 5)))) },
                 colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
             )
