@@ -27,7 +27,7 @@ enum class HomeItem(val id: String, val title: String, val locked: Boolean = fal
 
 data class Settings(
     val sourceId: String = "ecmwf",
-    val radarId: String = "auto",
+    val radarId: String = "dpc",
     val radarModel: String = "icon2i",
     /** Luminosità della mappa, 30..100 %. */
     val mapBrightness: Int = 100,

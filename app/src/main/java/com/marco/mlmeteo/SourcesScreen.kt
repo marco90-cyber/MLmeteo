@@ -119,12 +119,6 @@ fun SourcesScreen() {
 
 @Composable
 fun RadarSourceRow() {
-    val s = AppState.settings
-    ChoiceRow(
-        title = "Radar",
-        icon = Icons.Filled.Radar,
-        choices = RadarSource.entries.map { Choice(it.id, it.title, it.info, it.available) },
-        selected = s.radarId,
-        onPick = { id -> AppState.update { it.copy(radarId = id) } },
-    )
+    // il radar è solo quello della Protezione Civile: niente scelta
+    SettingRow("Radar", RadarSource.DPC.title, Icons.Filled.Radar)
 }

@@ -23,7 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -72,21 +72,6 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
-
-/** Frame del radar RainViewer, condivisi tra Home e schermata Radar. */
-object RadarCache {
-    var frames by mutableStateOf<WeatherRepo.RadarFrames?>(null)
-    var loadedAt = 0L
-    suspend fun ensure(force: Boolean = false) {
-        if (!force && frames != null && System.currentTimeMillis() - loadedAt < 10 * 60_000) return
-        try {
-            frames = WeatherRepo.rainViewer()
-            loadedAt = System.currentTimeMillis()
-        } catch (e: Exception) { }
-    }
-}
-
-fun rainViewerLayer(host: String, path: String) = TileLayer(7, 0.8f, zoomBoost = 1) { z, x, y -> "$host$path/256/$z/$x/$y/2/1_1.png" }
 
 /** Fulmini dal satellite MTG (EUMETSAT, area colpita negli ultimi minuti). [time] null = ultimo dato. */
 fun lightningLayer(time: Instant?) = TileLayer(8, 0.95f) { z, x, y ->
@@ -199,14 +184,24 @@ private fun scale(v: Double, stops: List<Pair<Double, Color>>): Color = colorAt(
 @Composable
 fun RadarPreview(place: Place) {
     val c = LocalAppColors.current
-    LaunchedEffect(Unit) { RadarCache.ensure() }
+    // anteprima con l'ultimo radar osservato della Protezione Civile
+    LaunchedEffect(Unit) { DpcCache.ensure() }
     val state = remember(place.id) { MapState(place.lat, place.lon, 6.0) }
-    val fr = RadarCache.frames
-    val layers = buildList {
-        add(baseLayer(c.dark, AppState.settings.mapBrightness / 100f))
-        fr?.frames?.lastOrNull()?.let { add(rainViewerLayer(fr.host, it.second)) }
-    }
+    val dpcFrames = DpcCache.frames
+    val dpcImg = remember(dpcFrames) { dpcFrames?.lastOrNull { !it.forecast }?.let { DpcRadar.render(it.q) } }
+    val layers = listOf(baseLayer(c.dark, AppState.settings.mapBrightness / 100f))
     TileMap(state, layers, interactive = false) { project, _ ->
+        dpcImg?.let { img ->
+            val tl = project(DpcRadar.NORTH, DpcRadar.WEST)
+            val br = project(DpcRadar.SOUTH, DpcRadar.EAST)
+            drawImage(
+                img, IntOffset.Zero, IntSize(img.width, img.height),
+                IntOffset(tl.x.roundToInt(), tl.y.roundToInt()),
+                IntSize((br.x - tl.x).roundToInt().coerceAtLeast(1), (br.y - tl.y).roundToInt().coerceAtLeast(1)),
+                alpha = 1f,
+                filterQuality = FilterQuality.Low,
+            )
+        }
         val p = project(place.lat, place.lon)
         drawCircle(Color.White, 7.dp.toPx(), p)
         drawCircle(c.accent, 5.dp.toPx(), p)
@@ -317,7 +312,7 @@ object HiResCache {
     fun clear() { value = null; key = "" }
 }
 
-private enum class RadarMode { DPC, RAINVIEWER, MODEL }
+private enum class RadarMode { DPC, MODEL }
 
 val MapModels = listOf(
     "multi" to "Multimodello",
@@ -373,15 +368,9 @@ fun RadarScreen() {
     val s = AppState.settings
     val scope = rememberCoroutineScope()
     val place = currentPlace()
-    val radar = RadarSource.byId(s.radarId)
-    val inItaly = place?.let { DpcRadar.contains(it.lat, it.lon) } ?: true
+    // il radar osservato è solo quello della Protezione Civile; "Previsione" mostra le mappe dei modelli
     var autoForecast by remember { mutableStateOf(false) }
-    val mode = when (radar) {
-        RadarSource.MLMAP -> RadarMode.MODEL
-        RadarSource.DPC -> RadarMode.DPC
-        RadarSource.RAINVIEWER -> RadarMode.RAINVIEWER
-        else -> if (autoForecast) RadarMode.MODEL else if (inItaly) RadarMode.DPC else RadarMode.RAINVIEWER
-    }
+    val mode = if (autoForecast) RadarMode.MODEL else RadarMode.DPC
     val state = remember { MapState(place?.lat ?: 42.0, place?.lon ?: 12.5, 6.0) }
     var playing by remember { mutableStateOf(false) }
     var phase by remember { mutableFloatStateOf(0f) }
@@ -399,12 +388,6 @@ fun RadarScreen() {
         val f = l.getOrNull(i) ?: return null
         return dpcImages.get(i) ?: DpcRadar.render(f.q).also { dpcImages.put(i, it) }
     }
-
-    // --- RainViewer
-    LaunchedEffect(Unit) { RadarCache.ensure() }
-    val frames = RadarCache.frames
-    var frame by remember { mutableIntStateOf(-1) }
-    LaunchedEffect(frames) { frames?.let { frame = it.frames.lastIndex } }
 
     // --- previsione
     var layer by remember { mutableStateOf(MapLayer.RAIN) }
@@ -511,7 +494,6 @@ fun RadarScreen() {
                 mode == RadarMode.MODEL && isIcon2i -> i2?.let { if (it.times.isNotEmpty()) i2Index = (i2Index + 1) % it.times.size }
                 mode == RadarMode.MODEL -> if (gridCount > 0) hour = (hour + 1) % gridCount
                 mode == RadarMode.DPC -> DpcCache.frames?.let { if (it.isNotEmpty()) dpcIndex = (dpcIndex + 1) % it.size }
-                else -> RadarCache.frames?.let { if (it.frames.isNotEmpty()) frame = (frame + 1) % it.frames.size }
             }
             phase = 0f
         }
@@ -521,7 +503,6 @@ fun RadarScreen() {
     val lightningTime: Instant? = when (mode) {
         RadarMode.DPC -> dpc?.getOrNull(dpcIndex)?.takeIf { !it.forecast && dpcIndex != dpc?.indexOfLast { f -> !f.forecast } }
             ?.let { Instant.ofEpochMilli(it.time) }
-        RadarMode.RAINVIEWER -> frames?.frames?.getOrNull(frame)?.takeIf { frame != frames?.frames?.lastIndex }?.let { Instant.ofEpochSecond(it.first) }
         else -> null
     }
     val showLightning = s.showLightning && mode != RadarMode.MODEL &&
@@ -529,9 +510,6 @@ fun RadarScreen() {
 
     val layers = buildList {
         add(baseLayer(c.dark, AppState.settings.mapBrightness / 100f))
-        if (mode == RadarMode.RAINVIEWER && frames != null) {
-            frames.frames.getOrNull(frame)?.let { add(rainViewerLayer(frames.host, it.second)) }
-        }
         if (showLightning) add(lightningLayer(lightningTime))
     }
 
@@ -627,7 +605,6 @@ fun RadarScreen() {
                         Text(
                             when {
                                 mode == RadarMode.DPC -> "Radar Protezione Civile + previsto 60 min"
-                                mode == RadarMode.RAINVIEWER -> "Radar RainViewer"
                                 model == "multi" -> "Media pesata di " + MultiMap.lastUsed.ifEmpty { listOf("4 modelli") }.joinToString(", ") +
                                     (if (MultiMap.lastMissing.isNotEmpty()) " (manca ${MultiMap.lastMissing.joinToString(", ")})" else "")
                                 model == "wrf" -> "Previsione WRF (1,5 km)"
@@ -642,13 +619,11 @@ fun RadarScreen() {
                         )
                     }
                 }
-                MapButton(Icons.Filled.Layers, "Fonte radar") { showSources = true }
+                MapButton(Icons.Filled.Brightness6, "Luminosità della mappa", active = showSources) { showSources = !showSources }
             }
-            if (radar == RadarSource.AUTO) {
-                FloatBox(Modifier.fillMaxWidth(0.8f).align(Alignment.CenterHorizontally), RoundedCornerShape(22.dp)) {
-                    Segmented(listOf("obs" to "Radar", "fc" to "Previsione"), if (autoForecast) "fc" else "obs") {
-                        autoForecast = it == "fc"; playing = false
-                    }
+            FloatBox(Modifier.fillMaxWidth(0.8f).align(Alignment.CenterHorizontally), RoundedCornerShape(22.dp)) {
+                Segmented(listOf("obs" to "Radar", "fc" to "Previsione"), if (autoForecast) "fc" else "obs") {
+                    autoForecast = it == "fc"; playing = false
                 }
             }
         }
@@ -740,15 +715,6 @@ fun RadarScreen() {
                             else -> ""
                         }
                     }
-                    else -> {
-                        count = frames?.frames?.size ?: 0
-                        index = frame
-                        label = frames?.frames?.getOrNull(frame)?.let {
-                            Instant.ofEpochSecond(it.first).atZone(ZoneId.systemDefault())
-                                .format(DateTimeFormatter.ofPattern("HH:mm", Locale.ITALY)) +
-                                if (frame == count - 1) " · ultimo dato" else ""
-                        } ?: "Caricamento radar…"
-                    }
                 }
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -771,7 +737,6 @@ fun RadarScreen() {
                             Tiles.clearFailed()
                             when {
                                 mode == RadarMode.DPC -> scope.launch { DpcCache.ensure(force = true) }
-                                mode == RadarMode.RAINVIEWER -> scope.launch { RadarCache.ensure(force = true) }
                                 isIcon2i -> { HiResCache.clear(); reload++ }
                                 else -> reload++
                             }
@@ -788,7 +753,6 @@ fun RadarScreen() {
                                 mode == RadarMode.MODEL && isIcon2i -> i2Index = v.roundToInt()
                                 mode == RadarMode.MODEL -> hour = v.roundToInt()
                                 mode == RadarMode.DPC -> dpcIndex = v.roundToInt()
-                                else -> frame = v.roundToInt()
                             }
                         },
                         valueRange = 0f..(count - 1).toFloat(),
@@ -804,7 +768,6 @@ fun RadarScreen() {
                 Text(
                     "© OpenStreetMap contributors · " + when {
                         mode == RadarMode.DPC -> "Radar: Dipartimento della Protezione Civile"
-                        mode == RadarMode.RAINVIEWER -> "Rain Viewer"
                         model == "wrf" -> "WRF: ItaliaMeteo"
                         model == "multi" -> "Multimodello: ItaliaMeteo / ARPAE, Deutscher Wetterdienst, ECMWF (CC-BY 4.0)"
                         model == "gfs" -> "GFS: NOAA"
@@ -817,48 +780,29 @@ fun RadarScreen() {
                 )
             }
         }
-    }
 
-    if (showSources) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showSources = false },
-            containerColor = c.card,
-            title = { Text("Mappa e radar", color = c.ink) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Luminosità della mappa", color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.Slider(
-                            value = s.mapBrightness.toFloat(),
-                            onValueChange = { v -> AppState.update { it.copy(mapBrightness = (v / 5).roundToInt() * 5) } },
-                            valueRange = 30f..100f,
-                            modifier = Modifier.weight(1f),
-                            colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
-                        )
-                        Gap(8)
-                        Text("${s.mapBrightness}%", color = c.inkDim, fontSize = 13.sp)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Text("Radar", color = c.ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    RadarSource.entries.forEach { r ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable(enabled = r.available) {
-                                AppState.update { it.copy(radarId = r.id) }; playing = false; showSources = false
-                            }.padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            androidx.compose.material3.RadioButton(selected = s.radarId == r.id, enabled = r.available,
-                                onClick = { AppState.update { it.copy(radarId = r.id) }; playing = false; showSources = false })
-                            Column {
-                                Text(r.title, color = if (r.available) c.ink else c.inkDim, fontSize = 15.sp)
-                                if (r.info.isNotBlank()) Text(r.info, color = c.inkDim, fontSize = 12.sp)
-                            }
-                        }
-                    }
+        // ---------------- luminosità della mappa: pannello sottile sopra la mappa (niente finestra a tutto schermo),
+        // così mentre muovi il cursore si vede subito l'effetto sulla mappa
+        if (showSources) {
+            FloatBox(
+                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 150.dp, start = 24.dp, end = 24.dp).fillMaxWidth(),
+                RoundedCornerShape(22.dp),
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Brightness6, contentDescription = null, tint = c.ink, modifier = Modifier.size(22.dp))
+                    Gap(8)
+                    Slider(
+                        value = s.mapBrightness.toFloat(),
+                        onValueChange = { v -> AppState.update { it.copy(mapBrightness = (v / 5).roundToInt() * 5) } },
+                        valueRange = 30f..100f,
+                        modifier = Modifier.weight(1f),
+                        colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
+                    )
+                    Gap(8)
+                    Text("${s.mapBrightness}%", color = c.inkDim, fontSize = 13.sp)
                 }
-            },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { showSources = false }) { Text("Chiudi", color = c.accent) } },
-        )
+            }
+        }
     }
 }
 
