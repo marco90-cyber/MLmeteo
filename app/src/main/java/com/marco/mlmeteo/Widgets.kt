@@ -496,7 +496,9 @@ object Widgets {
         // nome della città: cresce da solo fino quasi alla prima pillola (al massimo +40%), più lo slider "Nome città"
         val updP = p.text(10f, if (busy) c.accent else c.inkDim)
         val updShort = if (busy) "…" else fmt.time(upd)
-        val updW = if (cfg.showUpdated) dp(6f) + dp(12f) + dp(3f) + updP.measureText(updShort) else 0f
+        // l'orario di aggiornamento sta in una riga sua, sopra il nome: non toglie più larghezza al nome
+        val updLineDp = if (cfg.showUpdated) 14f else 0f
+        val updW = 0f
         val nameMax = if (gr != null) {
             val firstRow = gr.caps.indexOfFirst { it > 0 }
             (if (firstRow == 0) gr.left + gr.offs[0] - dp(10f) else gr.left - dp(12f)) - pad
@@ -506,7 +508,7 @@ object Widgets {
         val nameSp = autoName * sName; val nameSpP = autoName * sNameP
         val grow = nameSpP / 16f
         val subSp = 12f * (1f + (nameSp / 16f - 1f) * 0.5f) * sCond; val subSpP = 12f * (1f + (grow - 1f) * 0.5f) * sCondP
-        val headerDp = nameSpP + (if (sideExtras) subSpP + 4f else 0f) + 8f
+        val headerDp = updLineDp + nameSpP + (if (sideExtras) subSpP + 4f else 0f) + 8f
         // il blocco icona + temperatura è alto almeno quanto le pillole a destra
         var blockDp = when {
             !cfg.showCurrent -> 0f
@@ -553,17 +555,18 @@ object Widgets {
         val parts = listOf(cfg.showCurrent, hoursDp > 0, extrasRow, rainDp > 0, daysDp > 0).count { it }
         val gap = dp((free / (parts + 1)).coerceIn(0f, 16f))
 
-        // --- intestazione: nome, piccola icona dell'ultimo aggiornamento e (se c'è posto) condizione
-        var y = pad + dp(nameSpP) + gap / 2
-        val headerTop = y - dp(nameSpP)
+        // --- intestazione: piccola icona dell'ultimo aggiornamento, sopra il nome, e (se c'è posto) condizione
+        val updTop = pad + gap / 2
+        var y = updTop + dp(updLineDp) + dp(nameSpP)
+        val headerTop = updTop
         val nameP = p.text(nameSp, c.ink, true)
         // con la sovrapposizione il nome non viene tagliato
         val nameTxt = if (ov) place.name else p.fit(nameP, place.name, (nameMax - updW).coerceAtLeast(dp(40f)))
         cv.drawText(nameTxt, pad, y, nameP)
         if (cfg.showUpdated) {
-            val ux = pad + nameP.measureText(nameTxt) + dp(6f)
-            drawVector(cv, if (busy) Icons.Filled.Sync else Icons.Filled.Update, ux, y - dp(11.5f), dp(12f), (if (busy) c.accent else c.inkDim).toArgb())
-            cv.drawText(updShort, ux + dp(15f), y - dp(2f), updP)
+            // piccola icona + orario sopra la località
+            drawVector(cv, if (busy) Icons.Filled.Sync else Icons.Filled.Update, pad, updTop, dp(12f), (if (busy) c.accent else c.inkDim).toArgb())
+            cv.drawText(updShort, pad + dp(15f), updTop + dp(10f), updP)
         }
         if (sideExtras) {
             y += dp(subSpP + 4f)
