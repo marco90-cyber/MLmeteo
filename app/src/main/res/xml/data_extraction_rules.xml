@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 e successivi: le chiavi API non finiscono né nel backup su Google né nel trasferimento tra telefoni -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="mlmeteo_secrets.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="mlmeteo_secrets.xml" />
+    </device-transfer>
+</data-extraction-rules>

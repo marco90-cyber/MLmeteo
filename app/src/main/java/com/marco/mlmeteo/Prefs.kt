@@ -9,13 +9,35 @@ object Prefs {
     private const val NAME = "mlmeteo"
     private fun sp(ctx: Context): SharedPreferences = ctx.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
+    /** File a parte per le chiavi API: cifrato con il Keystore ed escluso dal backup (vedi backup_rules.xml). */
+    private const val SECRETS = "mlmeteo_secrets"
+    private fun secrets(ctx: Context): SharedPreferences = ctx.getSharedPreferences(SECRETS, Context.MODE_PRIVATE)
+
+    private fun loadKeys(ctx: Context): Map<String, String> {
+        val sec = secrets(ctx)
+        var json = sec.getString("apiKeys", null)?.let { Secrets.decrypt(it) }
+        if (json == null) {
+            // migrazione: versioni precedenti le tenevano in chiaro nelle preferenze normali
+            val legacy = sp(ctx).getString("apiKeys", null)
+            if (legacy != null) {
+                json = legacy
+                // il testo in chiaro si cancella solo dopo aver salvato la versione cifrata
+                Secrets.encrypt(legacy)?.let {
+                    sec.edit().putString("apiKeys", it).apply()
+                    sp(ctx).edit().remove("apiKeys").apply()
+                }
+            }
+        }
+        return try {
+            val o = JSONObject(json ?: "{}")
+            o.keys().asSequence().associateWith { o.getString(it) }
+        } catch (e: Exception) { emptyMap() }
+    }
+
     fun loadSettings(ctx: Context): Settings {
         val p = sp(ctx)
         val d = Settings()
-        val keys = try {
-            val o = JSONObject(p.getString("apiKeys", "{}") ?: "{}")
-            o.keys().asSequence().associateWith { o.getString(it) }
-        } catch (e: Exception) { emptyMap() }
+        val keys = loadKeys(ctx)
         return Settings(
             sourceId = p.getString("sourceId", d.sourceId) ?: d.sourceId,
             radarId = p.getString("radarId", d.radarId) ?: d.radarId,
@@ -72,6 +94,11 @@ object Prefs {
     fun saveSettings(ctx: Context, s: Settings) {
         val keys = JSONObject()
         s.apiKeys.forEach { (k, v) -> keys.put(k, v) }
+        // le chiavi si salvano solo cifrate; se il Keystore non funziona non si scrivono in chiaro
+        Secrets.encrypt(keys.toString())?.let {
+            secrets(ctx).edit().putString("apiKeys", it).apply()
+            sp(ctx).edit().remove("apiKeys").apply()
+        }
         sp(ctx).edit()
             .putString("sourceId", s.sourceId)
             .putString("radarId", s.radarId)
@@ -98,7 +125,6 @@ object Prefs {
             .putString("rainDisplay", s.rainDisplay)
             .putBoolean("useGps", s.useGps)
             .putString("mainPlaceId", s.mainPlaceId)
-            .putString("apiKeys", keys.toString())
             .putBoolean("notifAlerts", s.notifAlerts)
             .putInt("alertMinLevel", s.alertMinLevel)
             .putBoolean("alertWind", s.alertWind)
