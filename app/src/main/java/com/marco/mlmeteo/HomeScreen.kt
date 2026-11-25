@@ -3,6 +3,8 @@ package com.marco.mlmeteo
 import androidx.compose.foundation.Canvas
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -203,6 +205,9 @@ private fun Dots(n: Int, sel: Int) {
 @Composable
 private fun PlacePage(place: Place) {
     val c = LocalAppColors.current
+    // comparsa morbida del contenuto (dissolvenza + leggero scorrimento verso l'alto)
+    val appear = remember(place.id) { androidx.compose.animation.core.Animatable(if (AppState.settings.animations == "off") 1f else 0f) }
+    LaunchedEffect(place.id) { appear.animateTo(1f, tween(450)) }
     val s = AppState.settings
     val f = AppState.forecasts[place.id]
     val err = AppState.errors[place.id]
@@ -210,15 +215,17 @@ private fun PlacePage(place: Place) {
     LaunchedEffect(place.id) { AppState.refreshIfOld(place) }
     PullToRefreshBox(isRefreshing = loading && f != null, onRefresh = { AppState.refresh(place) }, modifier = Modifier.fillMaxSize()) {
         if (f == null) {
+            if (err == null || loading) {
+                HomeSkeleton()
+                return@PullToRefreshBox
+            }
             Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                if (err != null && !loading) {
-                    Text("Impossibile scaricare i dati", color = c.ink, fontSize = 18.sp)
-                    Text(err, color = c.inkDim, fontSize = 14.sp, textAlign = TextAlign.Center)
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = { AppState.refresh(place) }) { Text("Riprova") }
-                    Spacer(Modifier.height(8.dp))
-                    FilledTonalButton(onClick = { Nav.go(Screen.SOURCES) }) { Text("Cambia fonte") }
-                } else CircularProgressIndicator(color = c.accent)
+                Text("Impossibile scaricare i dati", color = c.ink, fontSize = 18.sp)
+                Text(err, color = c.inkDim, fontSize = 14.sp, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { AppState.refresh(place) }) { Text("Riprova") }
+                Spacer(Modifier.height(8.dp))
+                FilledTonalButton(onClick = { Nav.go(Screen.SOURCES) }) { Text("Cambia fonte") }
             }
             return@PullToRefreshBox
         }
@@ -243,6 +250,7 @@ private fun PlacePage(place: Place) {
         }
         Column(
             Modifier.fillMaxSize().onGloballyPositioned { HomeEdit.viewport = it.boundsInRoot() }
+                .graphicsLayer { alpha = appear.value; translationY = (1f - appear.value) * 28.dp.toPx() }
                 .verticalScroll(scroll).padding(horizontal = 16.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -287,6 +295,28 @@ private fun PlacePage(place: Place) {
     }
 }
 
+// ------------------------------------------------------------------ caricamento
+
+/** Segnaposto con la forma della Home mentre arrivano i primi dati (al posto del cerchio che gira). */
+@Composable
+private fun HomeSkeleton() {
+    val c = LocalAppColors.current
+    val a by rememberInfiniteTransition(label = "skeleton").animateFloat(
+        initialValue = 0.35f, targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "skeletonAlpha",
+    )
+    val col = c.card2.copy(alpha = a)
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.fillMaxWidth().height(230.dp).clip(RoundedCornerShape(28.dp)).background(col))
+        Box(Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(20.dp)).background(col))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f).height(152.dp).clip(RoundedCornerShape(20.dp)).background(col))
+            Box(Modifier.weight(1f).height(152.dp).clip(RoundedCornerShape(20.dp)).background(col))
+        }
+        Box(Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(20.dp)).background(col))
+    }
+}
+
 // ------------------------------------------------------------------ card principali
 
 @Composable
@@ -299,6 +329,10 @@ private fun MainCard(f: Forecast, fmt: Fmt, err: String?) {
     val sky = skyOf(cur.code)
     var taps by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val fx = rememberFx(sky, mode, Triple(f.fetchedAt, cur.code, taps))
+    // la temperatura sale fino al valore (apertura e aggiornamenti)
+    val tTarget = if (cur.temp.ok()) fmt.tempValue(cur.temp).toFloat() else 0f
+    val tAnim = remember { androidx.compose.animation.core.Animatable(tTarget - 8f) }
+    LaunchedEffect(tTarget, mode) { if (mode == "off") tAnim.snapTo(tTarget) else tAnim.animateTo(tTarget, tween(900)) }
     // ombra morbida: il testo resta leggibile sopra l'effetto
     val shadow = androidx.compose.ui.graphics.Shadow(
         if (c.dark) Color.Black.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.8f),
@@ -329,7 +363,7 @@ private fun MainCard(f: Forecast, fmt: Fmt, err: String?) {
                 WeatherIcon(cur.code, cur.isDay, 110.dp, phase = fx.phase, amp = if (mode == "off") 0f else fx.amp)
                 Gap(20)
                 Column {
-                    Text(fmt.temp(cur.temp), color = c.ink, fontSize = 80.sp, fontWeight = FontWeight.Bold, lineHeight = 84.sp,
+                    Text(if (cur.temp.ok()) "${tAnim.value.roundToInt()}°" else "—", color = c.ink, fontSize = 80.sp, fontWeight = FontWeight.Bold, lineHeight = 84.sp,
                         style = androidx.compose.ui.text.TextStyle(shadow = shadow))
                     Text(conditionText(cur.code, cur.isDay), color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.Medium,
                         style = androidx.compose.ui.text.TextStyle(shadow = shadow))
@@ -520,8 +554,21 @@ private fun GraphCard(f: Forecast, fmt: Fmt) {
     val temps = hours.map { fmt.tempValue(it.temp) }
     val lo = temps.filter { it.ok() }.minOrNull() ?: 0.0
     val hi = temps.filter { it.ok() }.maxOrNull() ?: 1.0
+    // ora toccata o trascinata (resta fino al prossimo tocco)
+    var sel by remember(f.fetchedAt) { mutableStateOf<Int?>(null) }
+    val touch = if (HomeEdit.editing) Modifier else Modifier.pointerInput(temps.size) {
+        fun idx(x: Float) = (x / size.width * (temps.size - 1)).roundToInt().coerceIn(0, temps.size - 1)
+        detectHorizontalDragGestures(onDragStart = { o -> sel = idx(o.x) }) { change, _ ->
+            change.consume(); sel = idx(change.position.x)
+        }
+    }
     CardBox {
-        CardTitle("Temperatura nelle prossime 24 ore")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { CardTitle("Temperatura nelle prossime 24 ore") }
+            val i = sel
+            if (i != null) Text("${if (i == 0) "Ora" else fmt.hourLabel(hours[i].time)} · ${fmt.temp(hours[i].temp)}", color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            else Text("scorri per i valori", color = c.inkDim, fontSize = 12.sp)
+        }
         Spacer(Modifier.height(12.dp))
         Row {
             Column(Modifier.height(100.dp), verticalArrangement = Arrangement.SpaceBetween) {
@@ -529,16 +576,40 @@ private fun GraphCard(f: Forecast, fmt: Fmt) {
                 Text("${lo.roundToInt()}°", color = c.inkDim, fontSize = 12.sp)
             }
             Gap(8)
-            Canvas(Modifier.weight(1f).height(100.dp)) {
+            Canvas(Modifier.weight(1f).height(100.dp).then(touch)) {
                 val range = (hi - lo).coerceAtLeast(1.0)
                 val dx = size.width / (temps.size - 1)
-                val p = Path()
-                temps.forEachIndexed { i, t ->
-                    val y = (size.height - 8.dp.toPx()) * (1 - ((t - lo) / range)).toFloat() + 4.dp.toPx()
-                    if (i == 0) p.moveTo(0f, y) else p.lineTo(i * dx, y)
+                // punti della curva (un valore mancante ripete l'ultimo valido)
+                var last = (lo + hi) / 2
+                val pts = temps.mapIndexed { i, t ->
+                    if (t.ok()) last = t
+                    Offset(i * dx, (size.height - 8.dp.toPx()) * (1 - ((last - lo) / range)).toFloat() + 4.dp.toPx())
+                }
+                val line = Path().apply {
+                    moveTo(pts[0].x, pts[0].y)
+                    for (i in 1 until pts.size) {
+                        val a = pts[i - 1]; val b = pts[i]
+                        val mx = (a.x + b.x) / 2
+                        cubicTo(mx, a.y, mx, b.y, b.x, b.y)
+                    }
+                }
+                val area = Path().apply {
+                    addPath(line)
+                    lineTo(pts.last().x, size.height); lineTo(pts[0].x, size.height); close()
                 }
                 drawLine(c.outline, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
-                drawPath(p, c.accent, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+                drawPath(area, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(c.accent.copy(alpha = 0.30f), Color.Transparent)))
+                drawPath(line, c.accent, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+                // adesso
+                drawCircle(c.accent.copy(alpha = 0.3f), 8.dp.toPx(), pts[0])
+                drawCircle(c.accent, 4.dp.toPx(), pts[0])
+                sel?.let { i ->
+                    val p = pts[i]
+                    drawLine(c.ink.copy(alpha = 0.4f), Offset(p.x, 0f), Offset(p.x, size.height), 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
+                    drawCircle(c.accent, 7.dp.toPx(), p)
+                    drawCircle(Color.White, 3.dp.toPx(), p)
+                }
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -1113,13 +1184,30 @@ private fun RainChartCard(f: Forecast, fmt: Fmt) {
     val maxProb = hours.mapNotNull { h -> h.precipProb.takeIf { it.ok() } }.maxOrNull()
     val probCol = Color(0xFF64B5F6)
     val mmCol = Color(0xFF1E88E5)
+    var sel by remember(f.fetchedAt) { mutableStateOf<Int?>(null) }
+    val touch = if (HomeEdit.editing) Modifier else Modifier.pointerInput(hours.size) {
+        fun idx(x: Float) = (x / size.width * hours.size).toInt().coerceIn(0, hours.size - 1)
+        detectHorizontalDragGestures(onDragStart = { o -> sel = idx(o.x) }) { change, _ ->
+            change.consume(); sel = idx(change.position.x)
+        }
+    }
     CardBox {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Pioggia nelle prossime 24 ore", color = c.accent, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            Text(fmt.rain(total), color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            if (maxProb != null) {
-                Text(" · ", color = c.inkDim, fontSize = 14.sp)
-                Text("${maxProb.roundToInt()}%", color = probCol, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            val i = sel
+            if (i != null) {
+                val h = hours[i]
+                Text("${if (i == 0) "Ora" else fmt.hourLabel(h.time)} · ${fmt.rain(if (h.precip.ok()) h.precip else 0.0)}", color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                if (h.precipProb.ok()) {
+                    Text(" · ", color = c.inkDim, fontSize = 14.sp)
+                    Text("${h.precipProb.roundToInt()}%", color = probCol, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Text(fmt.rain(total), color = c.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                if (maxProb != null) {
+                    Text(" · ", color = c.inkDim, fontSize = 14.sp)
+                    Text("${maxProb.roundToInt()}%", color = probCol, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -1131,10 +1219,11 @@ private fun RainChartCard(f: Forecast, fmt: Fmt) {
                 Text("0", color = mmCol, fontSize = 11.sp)
             }
             Gap(6)
-            Canvas(Modifier.weight(1f).height(110.dp)) {
+            Canvas(Modifier.weight(1f).height(110.dp).then(touch)) {
                 val n = hours.size
                 val slot = size.width / n
                 val bw = slot * 0.55f
+                sel?.let { i -> drawRect(c.ink.copy(alpha = 0.08f), Offset(i * slot, 0f), Size(slot, size.height)) }
                 // righe guida 0 / 50 / 100
                 for (f in listOf(0f, 0.5f, 1f)) {
                     drawLine(c.outline.copy(alpha = if (f == 1f) 1f else 0.5f), Offset(0f, size.height * f), Offset(size.width, size.height * f), 1.dp.toPx())
