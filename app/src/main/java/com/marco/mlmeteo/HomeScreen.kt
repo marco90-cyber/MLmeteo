@@ -249,6 +249,9 @@ private fun PlacePage(place: Place) {
             Spacer(Modifier.height(2.dp))
             if (HomeEdit.editing) EditBar()
             val items = s.orderedItems().filter { s.visible(it) }
+                .filter { it != HomeItem.POLLEN || HomeEdit.editing || AppState.pollen[place.id] != null }
+                .filter { it != HomeItem.SEA || HomeEdit.editing || AppState.marine[place.id] != null }
+                .filter { it != HomeItem.CONFIDENCE || HomeEdit.editing || f.confidence >= 0 }
                 .filter { it != HomeItem.ALERTS || HomeEdit.editing || !AppState.alerts[place.id].isNullOrEmpty() || AlertsRepo.status[place.id]?.failed?.isNotEmpty() == true }
             val block: @Composable (HomeItem) -> Unit = { item ->
                 when (item) {
@@ -715,6 +718,28 @@ private fun SmallCard(item: HomeItem, place: Place, f: Forecast, fmt: Fmt) {
             Big(a?.aqi?.takeIf { it.ok() }?.roundToInt()?.toString() ?: "—", aqiText(a?.aqi ?: Double.NaN))
             AqiBar(Modifier.fillMaxWidth().height(14.dp), a?.aqi ?: Double.NaN)
             if (a != null && a.pm25.ok()) Sub("PM2,5 ${a.pm25.roundToInt()} · PM10 ${a.pm10.roundToInt()} µg/m³")
+        }
+        HomeItem.POLLEN -> Small("Polline") {
+            val top = AppState.pollen[place.id]?.top()
+            Big(top?.first ?: "—")
+            Sub(pollenText(top?.second ?: Double.NaN))
+            if (top != null) Sub("${top.second.roundToInt()} granuli/m³")
+        }
+        HomeItem.SEA -> Small("Mare") {
+            val m = AppState.marine[place.id]
+            Big(if (m != null && m.waveHeight.ok()) String.format(Locale.ITALY, "%.1f", m.waveHeight) else "—", "m")
+            Sub(seaState(m?.waveHeight ?: Double.NaN))
+            if (m != null && m.seaTemp.ok()) Sub("Acqua ${fmt.temp(m.seaTemp)}" + if (m.wavePeriod.ok()) " · onda ${m.wavePeriod.roundToInt()} s" else "")
+        }
+        HomeItem.CONFIDENCE -> Small("Affidabilità") {
+            Big(confidenceText(f.confidence))
+            Sub(when (f.confidence) {
+                2 -> "I modelli concordano nelle prossime 48 ore"
+                1 -> "Qualche differenza tra i modelli"
+                0 -> "I modelli non concordano: previsione incerta"
+                else -> "Disponibile con il Multimodello"
+            })
+            if (f.spread.ok()) Sub("Scarto medio ${String.format(Locale.ITALY, "%.1f", f.spread)}°")
         }
         HomeItem.MOON -> Small("Luna") {
             val m = moonInfo(f.localNow.toLocalDate())

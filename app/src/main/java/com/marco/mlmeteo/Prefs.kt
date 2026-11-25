@@ -181,7 +181,7 @@ object ForecastStore {
                 .put("ss", x.sunset?.toString() ?: "").put("uv", d(x.uvMax)))
         }
         return JSONObject().put("current", cur).put("hours", hours).put("days", days).put("source", f.sourceName)
-            .put("at", f.fetchedAt).put("now", f.localNow.toString())
+            .put("at", f.fetchedAt).put("now", f.localNow.toString()).put("cf", f.confidence).put("sp", d(f.spread))
     }
 
     fun fromJson(o: JSONObject): Forecast {
@@ -201,6 +201,7 @@ object ForecastStore {
                 x.optString("sr").takeIf { it.isNotBlank() }?.let { java.time.LocalDateTime.parse(it) },
                 x.optString("ss").takeIf { it.isNotBlank() }?.let { java.time.LocalDateTime.parse(it) }, x.dd("uv"))
         }
-        return Forecast(cur, hours, days, o.optString("source"), o.optLong("at"), java.time.LocalDateTime.parse(o.getString("now")))
+        return Forecast(cur, hours, days, o.optString("source"), o.optLong("at"), java.time.LocalDateTime.parse(o.getString("now")),
+            o.optInt("cf", -1), if (o.has("sp")) o.dd("sp") else Double.NaN)
     }
 }

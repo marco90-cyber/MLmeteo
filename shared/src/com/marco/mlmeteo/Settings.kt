@@ -18,6 +18,9 @@ enum class HomeItem(val id: String, val title: String, val locked: Boolean = fal
     VISIBILITY("visibility", "Visibilità", small = true),
     AIR("air", "Qualità dell'aria", small = true),
     MOON("moon", "Luna", small = true),
+    POLLEN("pollen", "Polline", small = true),
+    SEA("sea", "Mare", small = true),
+    CONFIDENCE("confidence", "Affidabilità previsione", small = true),
     SUN("sun", "Sole (alba e tramonto)");
 
     companion object {

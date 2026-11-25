@@ -41,6 +41,8 @@ object AppState {
     val forecasts = mutableStateMapOf<String, Forecast>()
     val alerts = mutableStateMapOf<String, List<Alert>>()
     val air = mutableStateMapOf<String, AirQuality>()
+    val pollen = mutableStateMapOf<String, Pollen>()
+    val marine = mutableStateMapOf<String, Marine>()
     val errors = mutableStateMapOf<String, String>()
     val loading = mutableStateMapOf<String, Boolean>()
 
@@ -154,6 +156,8 @@ object AppState {
                 loading[p.id] = false
             }
             WeatherRepo.airQuality(p)?.let { air[p.id] = it; WidgetStore.saveAir(app, p.id, it.aqi) }
+            WeatherRepo.pollen(p).let { if (it != null) pollen[p.id] = it else pollen.remove(p.id) }
+            WeatherRepo.marine(p).let { if (it != null) marine[p.id] = it else marine.remove(p.id) }
             try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { AppLog.w("Allerte ${p.name}: ${e.message}") }
             Widgets.updateAll(app)
         }

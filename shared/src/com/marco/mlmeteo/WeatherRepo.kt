@@ -348,7 +348,30 @@ object WeatherRepo {
                 precipSum = wmedian(same.map { it.first.precipSum to it.second }),
             )
         }
-        Forecast(cur, hours, days, "Multimodello (${results.size} modelli)", System.currentTimeMillis(), base.localNow)
+        // affidabilità: quanto i modelli concordano nelle prossime 48 ore (temperatura e pioggia sì/no)
+        var sdSum = 0.0; var sdN = 0; var rainDis = 0; var rainN = 0
+        for (h in base.hours.take(48)) {
+            val same = results.mapNotNull { (_, f) -> f.hours.firstOrNull { it.time == h.time } }
+            val temps = same.map { it.temp }.filter { it.ok() }
+            if (temps.size >= 2) {
+                val mean = temps.average()
+                sdSum += kotlin.math.sqrt(temps.sumOf { (it - mean) * (it - mean) } / temps.size); sdN++
+            }
+            val rains = same.map { it.precip }.filter { it.ok() }
+            if (rains.size >= 2) {
+                rainN++
+                if (rains.any { it >= 0.3 } && rains.any { it < 0.1 }) rainDis++
+            }
+        }
+        val spread = if (sdN > 0) sdSum / sdN else Double.NaN
+        val dis = if (rainN > 0) rainDis.toDouble() / rainN else 0.0
+        val conf = when {
+            results.size < 2 || !spread.ok() -> -1
+            spread < 1.5 && dis < 0.15 -> 2
+            spread > 3.0 || dis > 0.35 -> 0
+            else -> 1
+        }
+        Forecast(cur, hours, days, "Multimodello (${results.size} modelli)", System.currentTimeMillis(), base.localNow, conf, spread)
     }
 
     /** Temperatura e cielo attuali di ogni fonte, per la pagina "Fonte dati". */
@@ -369,6 +392,28 @@ object WeatherRepo {
                 "&current=european_aqi,pm2_5,pm10&timezone=auto"
             val c = JSONObject(Net.get(url)).getJSONObject("current")
             AirQuality(c.d("european_aqi"), c.d("pm2_5"), c.d("pm10"))
+        } catch (e: Exception) { null }
+    }
+
+    /** Polline (Open-Meteo / CAMS, solo Europa): null se non disponibile o fuori stagione per tutti i tipi. */
+    suspend fun pollen(place: Place): Pollen? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${fmt(place.lat)}&longitude=${fmt(place.lon)}" +
+                "&current=alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen&timezone=auto"
+            val c = JSONObject(Net.get(url)).getJSONObject("current")
+            val p = Pollen(c.d("alder_pollen"), c.d("birch_pollen"), c.d("grass_pollen"), c.d("mugwort_pollen"), c.d("olive_pollen"), c.d("ragweed_pollen"))
+            if (p.top() == null) null else p
+        } catch (e: Exception) { null }
+    }
+
+    /** Mare (Open-Meteo Marine): null per le località lontane dal mare. */
+    suspend fun marine(place: Place): Marine? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://marine-api.open-meteo.com/v1/marine?latitude=${fmt(place.lat)}&longitude=${fmt(place.lon)}" +
+                "&current=wave_height,wave_period,wave_direction,sea_surface_temperature&timezone=auto"
+            val c = JSONObject(Net.get(url)).getJSONObject("current")
+            val m = Marine(c.d("wave_height"), c.d("wave_period"), c.d("wave_direction"), c.d("sea_surface_temperature"))
+            if (!m.waveHeight.ok() && !m.seaTemp.ok()) null else m
         } catch (e: Exception) { null }
     }
 

@@ -58,9 +58,46 @@ data class Forecast(
     val fetchedAt: Long,
     /** Ora locale della località al momento del download. */
     val localNow: LocalDateTime,
+    /** Solo Multimodello: accordo tra i modelli nelle prossime 48 ore (2 alta, 1 media, 0 bassa, -1 non disponibile). */
+    val confidence: Int = -1,
+    /** Solo Multimodello: scarto medio della temperatura tra i modelli nelle prossime 48 ore, in °C. */
+    val spread: Double = Double.NaN,
 )
 
 data class AirQuality(val aqi: Double, val pm25: Double, val pm10: Double)
+
+/** Concentrazione di polline in granuli/m³ (solo Europa, stagionale). */
+data class Pollen(val alder: Double, val birch: Double, val grass: Double, val mugwort: Double, val olive: Double, val ragweed: Double) {
+    /** Il polline più abbondante adesso. */
+    fun top(): Pair<String, Double>? = listOf(
+        "Ontano" to alder, "Betulla" to birch, "Graminacee" to grass,
+        "Artemisia" to mugwort, "Olivo" to olive, "Ambrosia" to ragweed,
+    ).filter { it.second.ok() }.maxByOrNull { it.second }
+}
+
+fun pollenText(g: Double): String = when {
+    !g.ok() -> "—"
+    g < 10 -> "Basso"
+    g < 50 -> "Moderato"
+    g < 200 -> "Alto"
+    else -> "Molto alto"
+}
+
+/** Mare: altezza e periodo delle onde e temperatura dell'acqua (solo località sulla costa). */
+data class Marine(val waveHeight: Double, val wavePeriod: Double, val waveDir: Double, val seaTemp: Double)
+
+fun seaState(h: Double): String = when {
+    !h.ok() -> "—"
+    h < 0.1 -> "Calmo"
+    h < 0.5 -> "Quasi calmo"
+    h < 1.25 -> "Poco mosso"
+    h < 2.5 -> "Mosso"
+    h < 4.0 -> "Molto mosso"
+    h < 6.0 -> "Agitato"
+    else -> "Molto agitato"
+}
+
+fun confidenceText(c: Int): String = when (c) { 2 -> "Alta"; 1 -> "Media"; 0 -> "Bassa"; else -> "—" }
 
 data class Place(
     val id: String,
