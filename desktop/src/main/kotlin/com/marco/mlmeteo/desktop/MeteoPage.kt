@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.marco.mlmeteo.AirQuality
+import com.marco.mlmeteo.AlertsRepo
 import com.marco.mlmeteo.AppState
 import com.marco.mlmeteo.AqiBar
 import com.marco.mlmeteo.Fmt
@@ -189,6 +190,20 @@ fun MeteoPage(width: Dp, onMenu: (() -> Unit)?) {
                     Icon(Icons.Outlined.WarningAmber, null, tint = col)
                     Spacer(Modifier.width(10.dp))
                     Text("Allerta ${levelName(lvl)}: ${al.first().title}" + if (al.size > 1) " (+${al.size - 1})" else "", color = c.ink, fontSize = 14.sp)
+                }
+            }
+            AlertsRepo.status[place.id]?.takeIf { it.failed.isNotEmpty() }?.let { st ->
+                val col = Color(0xFF9E9E9E)
+                Row(
+                    Modifier.fillMaxWidth().uiCard(col.copy(alpha = 0.18f)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.WarningAmber, null, tint = col)
+                    Spacer(Modifier.width(10.dp))
+                    val last = if (st.lastOkAt > 0) " Ultimo controllo riuscito alle " +
+                        java.time.Instant.ofEpochMilli(st.lastOkAt).atZone(java.time.ZoneId.systemDefault())
+                            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")) + "." else ""
+                    Text("Allerte forse non aggiornate: ${st.failed.joinToString(" e ")} non risponde.$last", color = c.inkDim, fontSize = 13.sp)
                 }
             }
             Header(place, f, fmt)

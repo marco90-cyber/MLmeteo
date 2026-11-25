@@ -249,7 +249,7 @@ private fun PlacePage(place: Place) {
             Spacer(Modifier.height(2.dp))
             if (HomeEdit.editing) EditBar()
             val items = s.orderedItems().filter { s.visible(it) }
-                .filter { it != HomeItem.ALERTS || HomeEdit.editing || !AppState.alerts[place.id].isNullOrEmpty() }
+                .filter { it != HomeItem.ALERTS || HomeEdit.editing || !AppState.alerts[place.id].isNullOrEmpty() || AlertsRepo.status[place.id]?.failed?.isNotEmpty() == true }
             val block: @Composable (HomeItem) -> Unit = { item ->
                 when (item) {
                     HomeItem.ALERTS -> AlertsBanner(place)
@@ -980,9 +980,16 @@ private fun AlertsBanner(place: Place) {
     val c = LocalAppColors.current
     val list = AppState.alerts[place.id].orEmpty()
     var open by remember { mutableStateOf(false) }
+    val st = AlertsRepo.status[place.id]
+    val failed = st?.failed.orEmpty()
     if (list.isEmpty()) {
-        // visibile solo in modifica, per poterlo spostare
-        CardBox { Text("Allerte meteo (compare solo quando ce ne sono)", color = c.inkDim, fontSize = 14.sp) }
+        if (failed.isNotEmpty()) {
+            // nessuna allerta mostrata, ma il controllo non è riuscito: non deve sembrare "tutto tranquillo"
+            AlertsWarning(failed, st?.lastOkAt ?: 0L, empty = true)
+        } else {
+            // visibile solo in modifica, per poterlo spostare
+            CardBox { Text("Allerte meteo (compare solo quando ce ne sono)", color = c.inkDim, fontSize = 14.sp) }
+        }
         return
     }
     val top = list.first()
@@ -999,6 +1006,9 @@ private fun AlertsBanner(place: Place) {
             Text("${top.source} · $whenTxt" + if (list.size > 1) " · altre ${list.size - 1}" else "", color = fg, fontSize = 13.sp)
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = fg)
+    }
+    if (failed.isNotEmpty()) {
+        AlertsWarning(failed, st?.lastOkAt ?: 0L, empty = false)
     }
     if (open) {
         androidx.compose.material3.AlertDialog(
@@ -1022,6 +1032,25 @@ private fun AlertsBanner(place: Place) {
             },
             confirmButton = { androidx.compose.material3.TextButton(onClick = { open = false }) { Text("Chiudi") } },
         )
+    }
+}
+
+/** Avviso: una o più fonti di allerta non hanno risposto, quindi le allerte potrebbero non essere aggiornate. */
+@Composable
+private fun AlertsWarning(failed: List<String>, lastOkAt: Long, empty: Boolean) {
+    val c = LocalAppColors.current
+    val last = if (lastOkAt > 0) {
+        val t = java.time.Instant.ofEpochMilli(lastOkAt).atZone(java.time.ZoneId.systemDefault())
+        " Ultimo controllo riuscito alle " + t.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")) + "."
+    } else " Nessun controllo riuscito finora."
+    val who = failed.joinToString(" e ")
+    val msg = (if (empty) "Allerte non verificate: $who non risponde." else "Allerte forse non aggiornate: $who non risponde.") + last
+    CardBox {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Warning, contentDescription = "Attenzione", tint = c.inkDim, modifier = Modifier.size(20.dp))
+            Gap(10)
+            Text(msg, color = c.inkDim, fontSize = 13.sp)
+        }
     }
 }
 

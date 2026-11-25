@@ -1,10 +1,12 @@
 package com.marco.mlmeteo
 
+import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -38,7 +40,22 @@ object AlertsRepo {
     private const val DPC_REPO = "pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica"
     lateinit var cacheDir: File
 
-    private val cache = HashMap<String, Pair<Long, List<Alert>>>()
+    private class Cached(val at: Long, val ttl: Long, val list: List<Alert>)
+
+    private val cache = HashMap<String, Cached>()
+
+    /** Ultimo risultato valido di una fonte per una località (chiave "località|fonte"): resta in uso se la fonte non risponde. */
+    private val lastGood = HashMap<String, List<Alert>>()
+    private val lastOk = HashMap<String, Long>()
+
+    /**
+     * Esito dell'ultimo controllo delle allerte ufficiali di una località.
+     * [failed]: fonti che non hanno risposto (le allerte mostrate possono essere vecchie);
+     * [lastOkAt]: ora dell'ultimo controllo riuscito di tutte le fonti (0 = mai).
+     */
+    class Status(val failed: List<String>, val checkedAt: Long, val lastOkAt: Long)
+
+    val status = mutableStateMapOf<String, Status>()
 
     /**
      * Allerte ufficiali più, se si passano previsione e impostazioni, quelle calcolate dalla previsione
@@ -52,15 +69,34 @@ object AlertsRepo {
     }
 
     private suspend fun official(p: Place, force: Boolean): List<Alert> = withContext(Dispatchers.IO) {
-        cache[p.id]?.let { if (!force && System.currentTimeMillis() - it.first < 30 * 60_000) return@withContext it.second }
+        cache[p.id]?.let { if (!force && System.currentTimeMillis() - it.at < it.ttl) return@withContext it.list }
         val out = ArrayList<Alert>()
+        val failed = ArrayList<String>()
+        val sources = ArrayList<String>()
         val italy = p.cc == "it" || (p.cc.isBlank() && p.region.contains("Italia"))
-        if (italy) try { out += dpc(p) } catch (e: Exception) { }
-        try { out += meteoAlarm(p) } catch (e: Exception) { }
+        // Una fonte che non risponde non deve sembrare "nessuna allerta": si tiene l'ultimo risultato buono e si segnala l'errore.
+        fun run(name: String, block: () -> List<Alert>) {
+            val key = "${p.id}|$name"
+            sources += key
+            try {
+                val r = block()
+                lastGood[key] = r
+                lastOk[key] = System.currentTimeMillis()
+                out += r
+            } catch (e: Exception) {
+                failed += name
+                lastGood[key]?.let { out += it }
+            }
+        }
+        if (italy) run("Protezione Civile") { dpc(p) }
+        run("MeteoAlarm") { meteoAlarm(p) }
         val now = ZonedDateTime.now()
         val list = out.filter { it.end == null || it.end.isAfter(now) }
             .sortedWith(compareByDescending<Alert> { it.level }.thenBy { it.start })
-        cache[p.id] = System.currentTimeMillis() to list
+        val t = System.currentTimeMillis()
+        // con errori si riprova presto (2 minuti), altrimenti dopo 30
+        cache[p.id] = Cached(t, if (failed.isEmpty()) 30 * 60_000 else 2 * 60_000, list)
+        status[p.id] = Status(failed, t, if (failed.isEmpty()) t else sources.mapNotNull { lastOk[it] }.minOrNull() ?: 0L)
         list
     }
 
@@ -124,12 +160,13 @@ object AlertsRepo {
 
     private fun dpc(p: Place): List<Alert> {
         if (System.currentTimeMillis() - dpcCheckedAt > 60 * 60_000 || dpcZones.isEmpty()) {
-            val stamp = latestStamp() ?: return emptyList()
+            val stamp = latestStamp() ?: throw IOException("Bollettino della Protezione Civile non trovato")
             if (stamp != dpcStamp || dpcZones.isEmpty()) {
                 val d = LocalDate.parse(stamp.substring(0, 8), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val m = HashMap<LocalDate, List<DpcZone>>()
                 try { m[d] = loadZones(stamp, "today") } catch (e: Exception) { }
                 try { m[d.plusDays(1)] = loadZones(stamp, "tomorrow") } catch (e: Exception) { }
+                if (m.isEmpty()) throw IOException("Bollettino della Protezione Civile non scaricabile")
                 dpcZones = m
                 dpcStamp = stamp
             }
