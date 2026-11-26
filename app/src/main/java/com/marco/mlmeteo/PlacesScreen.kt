@@ -299,9 +299,16 @@ private fun PlaceCard(p: Place, index: Int, main: Boolean, handle: Modifier? = n
                 Nav.page = AppState.places.indexOfFirst { it.id == p.id }.coerceAtLeast(0)
                 Nav.back()
             }
-            .padding(start = 16.dp, end = 4.dp, top = 14.dp, bottom = 14.dp),
+            .padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        IconButton(onClick = { AppState.update { it.copy(mainPlaceId = p.id) } }) {
+            Icon(
+                if (main) Icons.Filled.Notifications else Icons.Outlined.NotificationsNone,
+                contentDescription = if (main) "Località per le allerte" else "Usa per le allerte",
+                tint = if (main) c.accent else c.inkDim,
+            )
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (p.gps) {
@@ -321,13 +328,6 @@ private fun PlaceCard(p: Place, index: Int, main: Boolean, handle: Modifier? = n
         if (f != null) {
             WeatherIcon(f.current.code, f.current.isDay, 32.dp)
             Text(fmt.temp(f.current.temp), color = c.ink, fontSize = 30.sp, modifier = Modifier.padding(start = 6.dp))
-        }
-        IconButton(onClick = { AppState.update { it.copy(mainPlaceId = p.id) } }) {
-            Icon(
-                if (main) Icons.Filled.Notifications else Icons.Outlined.NotificationsNone,
-                contentDescription = if (main) "Località per le allerte" else "Usa per le allerte",
-                tint = if (main) c.accent else c.inkDim,
-            )
         }
         if (!p.gps) {
             Column {
