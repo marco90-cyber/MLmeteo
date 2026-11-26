@@ -374,6 +374,8 @@ fun RadarScreen() {
     val state = remember { MapState(place?.lat ?: 42.0, place?.lon ?: 12.5, 6.0) }
     var playing by remember { mutableStateOf(false) }
     var phase by remember { mutableFloatStateOf(0f) }
+    // mezz'ora tra un'ora e l'altra (solo mappe dei modelli a passo orario): sfumatura al 50% tra due ore
+    var half by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
 
@@ -482,9 +484,23 @@ fun RadarScreen() {
     val gridA = remember(grid, layer, hour) { grid?.let { gridBitmap(it, layer, hour) } }
     val gridB = remember(grid, layer, hour) { grid?.let { if (gridCount > 0) gridBitmap(it, layer, (hour + 1) % gridCount) else null } }
 
+    val modelTimes: List<java.time.LocalDateTime>? = when {
+        mode != RadarMode.MODEL -> null
+        isIcon2i -> i2?.times
+        else -> grid?.times
+    }
+    val halfOk = modelTimes != null && modelTimes.size > 1 &&
+        java.time.Duration.between(modelTimes[0], modelTimes[1]).toMinutes() == 60L
+    LaunchedEffect(halfOk, mode) { if (!halfOk) half = false }
+    val modelIdx = if (isIcon2i) i2Index else hour
+    // fase di sfumatura mostrata: 0,5 quando ci si ferma a metà tra due ore
+    val ph = if (halfOk && half && modelIdx < (modelTimes?.size ?: 0) - 1) 0.5f else phase
+    val halfShown = halfOk && modelIdx < (modelTimes?.size ?: 0) - 1 && (half || (playing && phase >= 0.5f))
+
     // --- animazione con dissolvenza
     LaunchedEffect(playing, mode, isIcon2i, model) {
         phase = 0f
+        half = false
         while (playing) {
             for (k in 1..8) {
                 delay(if (mode == RadarMode.MODEL) 60 else 80)
@@ -539,9 +555,9 @@ fun RadarScreen() {
                     if (d != null && d.times.isNotEmpty()) {
                         val n = d.times.size
                         val a = i2Image(i2Index.coerceIn(0, n - 1))
-                        val b = if (phase > 0f) i2Image((i2Index + 1) % n) else null
-                        if (a != null) drawRaster(a, d.north, d.south, d.west, d.east, if (b != null) 1f - phase else 1f)
-                        if (b != null) drawRaster(b, d.north, d.south, d.west, d.east, phase)
+                        val b = if (ph > 0f) i2Image((i2Index + 1) % n) else null
+                        if (a != null) drawRaster(a, d.north, d.south, d.west, d.east, if (b != null) 1f - ph else 1f)
+                        if (b != null) drawRaster(b, d.north, d.south, d.west, d.east, ph)
                         // frecce del vento su una griglia dello schermo
                         val windFn = d.wind
                         if (windFn != null) {
@@ -582,8 +598,8 @@ fun RadarScreen() {
                         val stepLon = (g.lons.last() - g.lons.first()) / (g.lons.size - 1)
                         val n = g.lats.last() + stepLat / 20; val sLat = g.lats.first() - stepLat / 20
                         val w = g.lons.first() - stepLon / 20; val e = g.lons.last() + stepLon / 20
-                        gridA?.let { drawRaster(it, n, sLat, w, e, if (gridB != null && phase > 0f) 1f - phase else 1f) }
-                        if (phase > 0f) gridB?.let { drawRaster(it, n, sLat, w, e, phase) }
+                        gridA?.let { drawRaster(it, n, sLat, w, e, if (gridB != null && ph > 0f) 1f - ph else 1f) }
+                        if (ph > 0f) gridB?.let { drawRaster(it, n, sLat, w, e, ph) }
                     }
                 }
                 else -> {}
@@ -676,7 +692,7 @@ fun RadarScreen() {
                         label = when {
                             i2Loading -> i2Progress.ifBlank { "Scarico i dati…" }
                             i2Error != null -> "Errore: $i2Error"
-                            d != null && count > 0 -> d.times[i2Index.coerceIn(0, count - 1)]
+                            d != null && count > 0 -> d.times[i2Index.coerceIn(0, count - 1)].let { if (halfShown) it.plusMinutes(30) else it }
                                 .format(DateTimeFormatter.ofPattern("EEE d · HH:mm", Locale.ITALY)).replaceFirstChar { it.uppercase() } +
                                 " · corsa ${d.run.substring(8)}:00 UTC"
                             else -> ""
@@ -692,7 +708,7 @@ fun RadarScreen() {
                         busy = gridLoading
                         label = when {
                             gridError != null -> "Errore: $gridError"
-                            g != null && count > 0 -> g.times[hour.coerceIn(0, count - 1)]
+                            g != null && count > 0 -> g.times[hour.coerceIn(0, count - 1)].let { if (halfShown) it.plusMinutes(30) else it }
                                 .format(DateTimeFormatter.ofPattern("EEE d · HH:mm", Locale.ITALY)).replaceFirstChar { it.uppercase() } +
                                 " · " + (MapModels.firstOrNull { it.first == gridModel }?.second ?: "")
                             gridLoading -> "Calcolo della mappa…"
@@ -745,17 +761,19 @@ fun RadarScreen() {
                     ) { Icon(Icons.Filled.Refresh, contentDescription = "Ricarica", tint = c.ink) }
                 }
                 if (count > 1) {
+                    val mult = if (halfOk) 2 else 1
                     Slider(
-                        value = index.coerceIn(0, count - 1).toFloat(),
+                        value = (index.coerceIn(0, count - 1) * mult + (if (halfOk && half) 1 else 0)).toFloat(),
                         onValueChange = { v ->
                             playing = false
+                            val r = v.roundToInt()
                             when {
-                                mode == RadarMode.MODEL && isIcon2i -> i2Index = v.roundToInt()
-                                mode == RadarMode.MODEL -> hour = v.roundToInt()
-                                mode == RadarMode.DPC -> dpcIndex = v.roundToInt()
+                                mode == RadarMode.MODEL && isIcon2i -> { i2Index = r / mult; half = halfOk && r % 2 == 1 }
+                                mode == RadarMode.MODEL -> { hour = r / mult; half = halfOk && r % 2 == 1 }
+                                mode == RadarMode.DPC -> dpcIndex = r
                             }
                         },
-                        valueRange = 0f..(count - 1).toFloat(),
+                        valueRange = 0f..((count - 1) * mult).toFloat(),
                     )
                 }
                 Legend(if (mode == RadarMode.MODEL) layer else MapLayer.RAIN, mode == RadarMode.MODEL)
