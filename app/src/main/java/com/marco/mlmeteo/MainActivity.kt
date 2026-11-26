@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AppState.locate()
-        AppState.savedPlaces.forEach { AppState.refreshIfOld(it) }
+        AppState.refreshStartup()
     }
 }
 
@@ -91,7 +91,7 @@ fun Root() {
             } else {
                 AppState.locate()
             }
-            AppState.savedPlaces.forEach { AppState.refreshIfOld(it) }
+            AppState.refreshStartup()
         }
         BackHandler(enabled = Nav.stack.size > 1) { Nav.back() }
         Box(Modifier.fillMaxSize().background(c.bg)) {

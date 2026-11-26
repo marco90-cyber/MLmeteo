@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
@@ -49,11 +50,18 @@ object AppState {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var inited = false
+    /** Al massimo 3 località scaricate insieme: con 20+ località salvate l'app non si satura. */
+    private val fetchSlots = kotlinx.coroutines.sync.Semaphore(3)
+    /** Località con dati di una fonte precedente: si riscaricano quando vengono mostrate. */
+    private val staleIds = mutableSetOf<String>()
     private val widgetLock = kotlinx.coroutines.sync.Mutex()
 
     /** I widget si disegnano come immagini: mai sul thread principale (bloccava l'interfaccia all'apertura). */
+    private var widgetJob: kotlinx.coroutines.Job? = null
     private fun updateWidgets() {
-        scope.launch(Dispatchers.Default) {
+        widgetJob?.cancel()
+        widgetJob = scope.launch(Dispatchers.Default) {
+            kotlinx.coroutines.delay(800) // più aggiornamenti ravvicinati diventano uno solo
             widgetLock.withLock {
                 try { Widgets.updateAll(app) } catch (e: Exception) { AppLog.w("Widget: ${e.message}") }
             }
@@ -139,7 +147,17 @@ object AppState {
 
     // ------------------------------------------------------------------ previsioni
 
-    fun refreshAll() = places.forEach { refresh(it) }
+    /** Scarica subito la località aperta e quella principale; le altre solo quando le si guarda (o dal lavoro in background). */
+    fun refreshAll() {
+        val first = listOfNotNull(places.getOrNull(Nav.page), mainPlace()).distinctBy { it.id }
+        staleIds.addAll(places.map { it.id })
+        first.forEach { refresh(it) }
+    }
+
+    /** All'apertura: solo la località mostrata e la principale (prima si aggiornavano tutte insieme e l'app si bloccava). */
+    fun refreshStartup() {
+        listOfNotNull(places.getOrNull(Nav.page), mainPlace()).distinctBy { it.id }.forEach { refreshIfOld(it) }
+    }
 
     /** Ricalcola le allerte (ad es. dopo aver cambiato le impostazioni) senza riscaricare le previsioni. */
     fun refreshAlerts() = places.forEach { p ->
@@ -157,12 +175,15 @@ object AppState {
             try {
                 val t0 = System.currentTimeMillis()
                 // rete non ancora pronta all'avvio: un secondo tentativo dopo qualche secondo
-                val f = try { WeatherRepo.forecast(p, source) }
+                val f = fetchSlots.withPermit {
+                    try { WeatherRepo.forecast(p, source) }
                     catch (e: java.io.IOException) { kotlinx.coroutines.delay(4000); WeatherRepo.forecast(p, source) }
+                }
                 AppLog.i("Previsione ${p.name} (${source.id}) in ${System.currentTimeMillis() - t0} ms")
                 forecasts[p.id] = f
                 errors.remove(p.id)
-                ForecastStore.save(app, p.id, f)
+                staleIds.remove(p.id)
+                withContext(Dispatchers.IO) { ForecastStore.save(app, p.id, f) }
                 updateWidgets()
                 if (p.id == mainPlace()?.id) withContext(Dispatchers.Default) { Notify.statusBar(app, p, f) }
             } catch (e: Exception) {
@@ -171,9 +192,11 @@ object AppState {
             } finally {
                 loading[p.id] = false
             }
+            fetchSlots.withPermit {
             WeatherRepo.airQuality(p)?.let { air[p.id] = it; WidgetStore.saveAir(app, p.id, it.aqi) }
             WeatherRepo.pollen(p).let { if (it != null) pollen[p.id] = it else pollen.remove(p.id) }
             WeatherRepo.marine(p).let { if (it != null) marine[p.id] = it else marine.remove(p.id) }
+            }
             try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { AppLog.w("Allerte ${p.name}: ${e.message}") }
             updateWidgets()
         }
@@ -182,7 +205,7 @@ object AppState {
     /** Se i dati hanno più di 30 minuti li riscarica. */
     fun refreshIfOld(p: Place) {
         val f = forecasts[p.id]
-        if (f == null || System.currentTimeMillis() - f.fetchedAt > 30 * 60_000) refresh(p)
+        if (f == null || p.id in staleIds || System.currentTimeMillis() - f.fetchedAt > 30 * 60_000) refresh(p)
     }
 
     // ------------------------------------------------------------------ GPS
