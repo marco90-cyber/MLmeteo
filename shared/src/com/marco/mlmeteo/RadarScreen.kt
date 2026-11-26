@@ -59,9 +59,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -493,18 +495,50 @@ fun RadarScreen() {
         java.time.Duration.between(modelTimes[0], modelTimes[1]).toMinutes() == 60L
     LaunchedEffect(halfOk, mode) { if (!halfOk) half = false }
     val modelIdx = if (isIcon2i) i2Index else hour
-    // fase di sfumatura mostrata: 0,5 quando ci si ferma a metà tra due ore
-    val ph = if (halfOk && half && modelIdx < (modelTimes?.size ?: 0) - 1) 0.5f else phase
-    val halfShown = halfOk && modelIdx < (modelTimes?.size ?: 0) - 1 && (half || (playing && phase >= 0.5f))
+    val halfShown = halfOk && half && modelIdx < (modelTimes?.size ?: 0) - 1
+
+    // immagine di mezz'ora: la pioggia viene spostata a metà strada tra le due ore (niente effetto fantasma)
+    val halfCache = remember(i2, grid, layer, model) { HashMap<Int, ImageBitmap>() }
+    var halfTick by remember { mutableIntStateOf(0) }
+    suspend fun ensureHalf(idx: Int) {
+        if (halfCache.containsKey(idx)) return
+        val ia: ImageBitmap?
+        val ib: ImageBitmap?
+        if (isIcon2i) {
+            ia = i2Image(idx); ib = i2Image(idx + 1)
+        } else {
+            val g = grid ?: return
+            ia = gridBitmap(g, layer, idx); ib = gridBitmap(g, layer, idx + 1)
+        }
+        if (ia == null || ib == null) return
+        val m = withContext(Dispatchers.Default) { FrameInterp.mid(ia, ib) } ?: return
+        if (halfCache.size > 8) halfCache.clear()
+        halfCache[idx] = m
+        halfTick++
+    }
+    LaunchedEffect(halfOk, half, modelIdx, i2, grid, layer) {
+        if (halfOk && half) ensureHalf(modelIdx)
+    }
+    val halfImg: ImageBitmap? = if (halfOk && half && halfTick >= 0) halfCache[modelIdx] else null
 
     // --- animazione con dissolvenza
-    LaunchedEffect(playing, mode, isIcon2i, model) {
+    LaunchedEffect(playing, mode, isIcon2i, model, halfOk) {
         phase = 0f
         half = false
         while (playing) {
-            for (k in 1..8) {
-                delay(if (mode == RadarMode.MODEL) 60 else 80)
-                phase = k / 8f
+            if (mode == RadarMode.MODEL && halfOk) {
+                // ora, mezz'ora, ora successiva…
+                half = false
+                delay(220)
+                ensureHalf(if (isIcon2i) i2Index else hour)
+                half = true
+                delay(220)
+                half = false
+            } else {
+                for (k in 1..8) {
+                    delay(if (mode == RadarMode.MODEL) 60 else 80)
+                    phase = k / 8f
+                }
             }
             when {
                 mode == RadarMode.MODEL && isIcon2i -> i2?.let { if (it.times.isNotEmpty()) i2Index = (i2Index + 1) % it.times.size }
@@ -555,9 +589,13 @@ fun RadarScreen() {
                     if (d != null && d.times.isNotEmpty()) {
                         val n = d.times.size
                         val a = i2Image(i2Index.coerceIn(0, n - 1))
-                        val b = if (ph > 0f) i2Image((i2Index + 1) % n) else null
-                        if (a != null) drawRaster(a, d.north, d.south, d.west, d.east, if (b != null) 1f - ph else 1f)
-                        if (b != null) drawRaster(b, d.north, d.south, d.west, d.east, ph)
+                        if (halfOk && half) {
+                            (halfImg ?: a)?.let { drawRaster(it, d.north, d.south, d.west, d.east, 1f) }
+                        } else {
+                            val b = if (phase > 0f) i2Image((i2Index + 1) % n) else null
+                            if (a != null) drawRaster(a, d.north, d.south, d.west, d.east, if (b != null) 1f - phase else 1f)
+                            if (b != null) drawRaster(b, d.north, d.south, d.west, d.east, phase)
+                        }
                         // frecce del vento su una griglia dello schermo
                         val windFn = d.wind
                         if (windFn != null) {
@@ -598,8 +636,12 @@ fun RadarScreen() {
                         val stepLon = (g.lons.last() - g.lons.first()) / (g.lons.size - 1)
                         val n = g.lats.last() + stepLat / 20; val sLat = g.lats.first() - stepLat / 20
                         val w = g.lons.first() - stepLon / 20; val e = g.lons.last() + stepLon / 20
-                        gridA?.let { drawRaster(it, n, sLat, w, e, if (gridB != null && ph > 0f) 1f - ph else 1f) }
-                        if (ph > 0f) gridB?.let { drawRaster(it, n, sLat, w, e, ph) }
+                        if (halfOk && half) {
+                            (halfImg ?: gridA)?.let { drawRaster(it, n, sLat, w, e, 1f) }
+                        } else {
+                            gridA?.let { drawRaster(it, n, sLat, w, e, if (gridB != null && phase > 0f) 1f - phase else 1f) }
+                            if (phase > 0f) gridB?.let { drawRaster(it, n, sLat, w, e, phase) }
+                        }
                     }
                 }
                 else -> {}
