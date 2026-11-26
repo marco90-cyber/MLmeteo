@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
@@ -48,6 +49,16 @@ object AppState {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var inited = false
+    private val widgetLock = kotlinx.coroutines.sync.Mutex()
+
+    /** I widget si disegnano come immagini: mai sul thread principale (bloccava l'interfaccia all'apertura). */
+    private fun updateWidgets() {
+        scope.launch(Dispatchers.Default) {
+            widgetLock.withLock {
+                try { Widgets.updateAll(app) } catch (e: Exception) { AppLog.w("Widget: ${e.message}") }
+            }
+        }
+    }
 
     fun init(ctx: Context) {
         if (inited) return
@@ -61,7 +72,12 @@ object AppState {
         IconD2.m.cacheDir = app.cacheDir
         Ecmwf.cacheDir = app.cacheDir
         AlertsRepo.cacheDir = app.cacheDir
-        settings = Prefs.loadSettings(app)
+        // senza chiavi API: il Keystore all'avvio sul thread principale può bloccare l'app; le chiavi si caricano subito dopo in background
+        settings = Prefs.loadSettings(app, withKeys = false)
+        scope.launch {
+            val keys = withContext(Dispatchers.IO) { try { Prefs.loadKeys(app) } catch (e: Exception) { emptyMap() } }
+            if (settings.apiKeys.isEmpty() && keys.isNotEmpty()) settings = settings.copy(apiKeys = keys)
+        }
         savedPlaces = Prefs.loadPlaces(app)
         gpsPlace = Prefs.loadGps(app)
         // ultimi dati salvati: l'app mostra subito qualcosa anche senza rete
@@ -94,7 +110,7 @@ object AppState {
         }
         if (old.iconSet != settings.iconSet || old.mode != settings.mode || old.useWallpaper != settings.useWallpaper ||
             old.manualColor != settings.manualColor || old.tempUnit != settings.tempUnit || old.rainDisplay != settings.rainDisplay
-        ) Widgets.updateAll(app)
+        ) updateWidgets()
     }
 
     // ------------------------------------------------------------------ località
@@ -129,7 +145,7 @@ object AppState {
     fun refreshAlerts() = places.forEach { p ->
         scope.launch {
             try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { }
-            Widgets.updateAll(app)
+            updateWidgets()
         }
     }
 
@@ -147,8 +163,8 @@ object AppState {
                 forecasts[p.id] = f
                 errors.remove(p.id)
                 ForecastStore.save(app, p.id, f)
-                Widgets.updateAll(app)
-                if (p.id == mainPlace()?.id) Notify.statusBar(app, p, f)
+                updateWidgets()
+                if (p.id == mainPlace()?.id) withContext(Dispatchers.Default) { Notify.statusBar(app, p, f) }
             } catch (e: Exception) {
                 AppLog.e("Previsione ${p.name} non riuscita", e)
                 errors[p.id] = e.message ?: "Errore di rete"
@@ -159,7 +175,7 @@ object AppState {
             WeatherRepo.pollen(p).let { if (it != null) pollen[p.id] = it else pollen.remove(p.id) }
             WeatherRepo.marine(p).let { if (it != null) marine[p.id] = it else marine.remove(p.id) }
             try { alerts[p.id] = AlertsRepo.forPlace(p, f = forecasts[p.id], s = settings).also { WidgetStore.saveAlertLevel(app, p.id, it) } } catch (e: Exception) { AppLog.w("Allerte ${p.name}: ${e.message}") }
-            Widgets.updateAll(app)
+            updateWidgets()
         }
     }
 

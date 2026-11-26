@@ -13,9 +13,16 @@ object Prefs {
     private const val SECRETS = "mlmeteo_secrets"
     private fun secrets(ctx: Context): SharedPreferences = ctx.getSharedPreferences(SECRETS, Context.MODE_PRIVATE)
 
-    private fun loadKeys(ctx: Context): Map<String, String> {
+    /** Chiavi già decifrate: il Keystore si interroga una sola volta per avvio, mai a ogni lettura delle impostazioni. */
+    @Volatile private var keyCache: Map<String, String>? = null
+    @Volatile private var keyCacheEnc: String? = null
+
+    /** Da chiamare fuori dal thread principale: il Keystore può essere lento (soprattutto al primo avvio dopo il riavvio del telefono). */
+    fun loadKeys(ctx: Context): Map<String, String> {
         val sec = secrets(ctx)
-        var json = sec.getString("apiKeys", null)?.let { Secrets.decrypt(it) }
+        val enc = sec.getString("apiKeys", null)
+        keyCache?.let { if (keyCacheEnc == enc) return it }
+        var json = enc?.let { Secrets.decrypt(it) }
         if (json == null) {
             // migrazione: versioni precedenti le tenevano in chiaro nelle preferenze normali
             val legacy = sp(ctx).getString("apiKeys", null)
@@ -28,16 +35,20 @@ object Prefs {
                 }
             }
         }
-        return try {
+        val out = try {
             val o = JSONObject(json ?: "{}")
             o.keys().asSequence().associateWith { o.getString(it) }
         } catch (e: Exception) { emptyMap() }
+        keyCache = out
+        keyCacheEnc = sec.getString("apiKeys", null)
+        return out
     }
 
-    fun loadSettings(ctx: Context): Settings {
+    /** withKeys = false: non tocca il Keystore (all'avvio, sul thread principale); le chiavi arrivano dopo da [loadKeys]. */
+    fun loadSettings(ctx: Context, withKeys: Boolean = true): Settings {
         val p = sp(ctx)
         val d = Settings()
-        val keys = loadKeys(ctx)
+        val keys = if (withKeys) loadKeys(ctx) else (keyCache ?: emptyMap())
         return Settings(
             sourceId = p.getString("sourceId", d.sourceId) ?: d.sourceId,
             radarId = p.getString("radarId", d.radarId) ?: d.radarId,
@@ -92,12 +103,20 @@ object Prefs {
     }
 
     fun saveSettings(ctx: Context, s: Settings) {
-        val keys = JSONObject()
-        s.apiKeys.forEach { (k, v) -> keys.put(k, v) }
-        // le chiavi si salvano solo cifrate; se il Keystore non funziona non si scrivono in chiaro
-        Secrets.encrypt(keys.toString())?.let {
-            secrets(ctx).edit().putString("apiKeys", it).apply()
-            sp(ctx).edit().remove("apiKeys").apply()
+        // le chiavi si salvano solo cifrate; se il Keystore non funziona non si scrivono in chiaro.
+        // Si riscrivono solo se sono cambiate: così salvare un'impostazione qualsiasi non passa dal Keystore.
+        // Se non sono ancora state caricate (avvio) e non ce ne sono in memoria, non si toccano quelle salvate.
+        if (keyCache != null || s.apiKeys.isNotEmpty()) {
+            if (keyCache != s.apiKeys) {
+                val keys = JSONObject()
+                s.apiKeys.forEach { (k, v) -> keys.put(k, v) }
+                Secrets.encrypt(keys.toString())?.let {
+                    secrets(ctx).edit().putString("apiKeys", it).apply()
+                    sp(ctx).edit().remove("apiKeys").apply()
+                    keyCache = s.apiKeys
+                    keyCacheEnc = it
+                }
+            }
         }
         sp(ctx).edit()
             .putString("sourceId", s.sourceId)

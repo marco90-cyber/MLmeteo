@@ -39,7 +39,7 @@ object Background {
     private const val MORNING = "mlmeteo-morning"
 
     fun schedule(ctx: Context) {
-        val s = Prefs.loadSettings(ctx)
+        val s = Prefs.loadSettings(ctx, withKeys = false)
         val wm = WorkManager.getInstance(ctx)
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(if (s.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
@@ -62,11 +62,11 @@ object Background {
         "afternoon" -> s.afternoonMinutes; "evening" -> s.eveningMinutes; "night" -> s.nightMinutes; else -> s.morningMinutes
     }
 
-    fun scheduleMorning(ctx: Context, s: Settings = Prefs.loadSettings(ctx)) {
+    fun scheduleMorning(ctx: Context, s: Settings = Prefs.loadSettings(ctx, withKeys = false)) {
         digests.forEach { scheduleDigest(ctx, it, s) }
     }
 
-    fun scheduleDigest(ctx: Context, slot: String, s: Settings = Prefs.loadSettings(ctx)) {
+    fun scheduleDigest(ctx: Context, slot: String, s: Settings = Prefs.loadSettings(ctx, withKeys = false)) {
         val wm = WorkManager.getInstance(ctx)
         val name = if (slot == "morning") MORNING else "mlmeteo-digest-$slot"
         if (!digestOn(s, slot)) { wm.cancelUniqueWork(name); return }
@@ -350,7 +350,7 @@ object Notify {
     }
 
     /** Notifica fissa con la temperatura come icona nella barra di stato. */
-    fun statusBar(ctx: Context, p: Place, f: Forecast, s: Settings = Prefs.loadSettings(ctx)) {
+    fun statusBar(ctx: Context, p: Place, f: Forecast, s: Settings = Prefs.loadSettings(ctx, withKeys = false)) {
         if (!s.notifStatus) { cancelStatus(ctx); return }
         val fmt = Fmt(s)
         val t = fmt.tempValue(f.current.temp).let { if (it.isNaN()) 0 else it.roundToInt() }

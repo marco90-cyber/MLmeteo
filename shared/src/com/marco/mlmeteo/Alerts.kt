@@ -64,7 +64,7 @@ object AlertsRepo {
     suspend fun forPlace(p: Place, force: Boolean = false, f: Forecast? = null, s: Settings? = null): List<Alert> {
         val official = official(p, force)
         if (f == null || s == null) return official
-        val computed = try { SevereAlerts.compute(p, f, s) } catch (e: Exception) { emptyList() }
+        val computed = try { withContext(Dispatchers.Default) { SevereAlerts.compute(p, f, s) } } catch (e: Exception) { emptyList() }
         return (official + computed).sortedWith(compareByDescending<Alert> { it.level }.thenBy { it.start })
     }
 

@@ -106,7 +106,7 @@ object Widgets {
     }
 
     fun placeFor(ctx: Context, widgetId: Int, cfg: WidgetCfg = WidgetStore.cfg(ctx, widgetId)): Place? {
-        val s = Prefs.loadSettings(ctx)
+        val s = Prefs.loadSettings(ctx, withKeys = false)
         val places = listOfNotNull(Prefs.loadGps(ctx).takeIf { s.useGps }) + Prefs.loadPlaces(ctx)
         return places.firstOrNull { it.id == cfg.place }
             ?: places.firstOrNull { it.id == s.mainPlaceId } ?: places.firstOrNull()
@@ -291,7 +291,7 @@ object Widgets {
     // ------------------------------------------------------------------ colori
 
     fun colors(ctx: Context, cfg: WidgetCfg): AppColors {
-        val s = Prefs.loadSettings(ctx)
+        val s = Prefs.loadSettings(ctx, withKeys = false)
         val sysDark = (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         val appDark = when (s.mode) { "light" -> false; "dark", "amoled" -> true; else -> sysDark }
         val dark = when (cfg.textMode) { "light" -> true; "dark" -> false; else -> appDark }
@@ -348,7 +348,7 @@ object Widgets {
     // ------------------------------------------------------------------ disegno: strumenti comuni
 
     private class Pen(val ctx: Context, val cfg: WidgetCfg, wDp: Int, hDp: Int) {
-        val s = Prefs.loadSettings(ctx)
+        val s = Prefs.loadSettings(ctx, withKeys = false)
         val c = colors(ctx, cfg)
         val fmt = Fmt(s)
         val scale = bitmapScale(wDp, hDp, ctx.resources.displayMetrics.density)
@@ -736,7 +736,7 @@ object Widgets {
 
     /** Valori dei dati extra scelti: (icona, testo). */
     private fun extrasFor(ctx: Context, cfg: WidgetCfg, place: Place, f: Forecast): List<Pair<ImageVector, String>> {
-        val fmt = Fmt(Prefs.loadSettings(ctx))
+        val fmt = Fmt(Prefs.loadSettings(ctx, withKeys = false))
         val cur = f.current
         val today = f.days.firstOrNull()
         return cfg.extras.mapNotNull { e ->
