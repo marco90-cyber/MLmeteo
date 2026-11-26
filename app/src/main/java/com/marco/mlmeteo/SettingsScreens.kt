@@ -544,7 +544,7 @@ fun NotificationsScreen() {
 fun ApiKeysScreen() {
     val s = AppState.settings
     Page("Chiavi API") {
-        Hint("Le chiavi restano solo sul tuo telefono. Le fonti con chiave verranno attivate in una prossima versione.")
+        Hint("Le chiavi restano solo sul tuo telefono. Dopo aver salvato la chiave, scegli la fonte in Fonte dati. Le chiavi appena create possono impiegare un po' ad attivarsi.")
         Sources.keyed.forEach { src ->
             var text by remember(src.id) { mutableStateOf(s.apiKeys[src.id] ?: "") }
             CardBox {

@@ -113,7 +113,7 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         val source = Sources.byId(s.sourceId)
         for (p in places.filter { it.id in wanted }) {
             try {
-                val f = WeatherRepo.forecast(p, source)
+                val f = WeatherRepo.forecast(p, source, s.apiKeys)
                 ForecastStore.save(ctx, p.id, f)
                 if (p.id == main.id) Notify.statusBar(ctx, p, f, s)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -146,7 +146,7 @@ class MorningWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             val places = (listOfNotNull(Prefs.loadGps(ctx).takeIf { s.useGps }) + Prefs.loadPlaces(ctx))
             val main = places.firstOrNull { it.id == s.mainPlaceId } ?: places.firstOrNull()
             if (main != null && Background.digestOn(s, slot)) {
-                val f = try { WeatherRepo.forecast(main, Sources.byId(s.sourceId)).also { ForecastStore.save(ctx, main.id, it) } }
+                val f = try { WeatherRepo.forecast(main, Sources.byId(s.sourceId), s.apiKeys).also { ForecastStore.save(ctx, main.id, it) } }
                     catch (e: Exception) { ForecastStore.load(ctx, main.id) }
                 if (f != null) Notify.digest(ctx, main, f, s, slot)
             }

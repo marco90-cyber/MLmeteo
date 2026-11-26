@@ -176,8 +176,8 @@ object AppState {
                 val t0 = System.currentTimeMillis()
                 // rete non ancora pronta all'avvio: un secondo tentativo dopo qualche secondo
                 val f = fetchSlots.withPermit {
-                    try { WeatherRepo.forecast(p, source) }
-                    catch (e: java.io.IOException) { kotlinx.coroutines.delay(4000); WeatherRepo.forecast(p, source) }
+                    try { WeatherRepo.forecast(p, source, settings.apiKeys) }
+                    catch (e: java.io.IOException) { kotlinx.coroutines.delay(4000); WeatherRepo.forecast(p, source, settings.apiKeys) }
                 }
                 AppLog.i("Previsione ${p.name} (${source.id}) in ${System.currentTimeMillis() - t0} ms")
                 forecasts[p.id] = f

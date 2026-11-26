@@ -80,19 +80,19 @@ object WeatherRepo {
     private const val DAILY = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max," +
         "precipitation_sum,sunrise,sunset,uv_index_max"
 
-    private class Parsed(val forecast: Forecast, val utcOffset: Int)
+    internal class Parsed(val forecast: Forecast, val utcOffset: Int)
 
     /** Scarica la previsione per la fonte scelta. */
-    suspend fun forecast(place: Place, source: Source): Forecast = withContext(Dispatchers.IO) {
+    suspend fun forecast(place: Place, source: Source, keys: Map<String, String> = emptyMap()): Forecast = withContext(Dispatchers.IO) {
         when (source.kind) {
             SourceKind.OPEN_METEO -> openMeteo(place, source.model, source.short).forecast
             SourceKind.METNO -> metno(place)
             SourceKind.CONSENSUS -> consensus(place)
-            SourceKind.API_KEY -> throw IOException("Questa fonte richiede una chiave API (in arrivo)")
+            SourceKind.API_KEY -> KeyedSources.fetch(place, source, keys[source.id].orEmpty())
         }
     }
 
-    private fun openMeteo(place: Place, model: String, label: String, days: Int = 16): Parsed {
+    internal fun openMeteo(place: Place, model: String, label: String, days: Int = 16): Parsed {
         val url = "https://api.open-meteo.com/v1/forecast?latitude=${fmt(place.lat)}&longitude=${fmt(place.lon)}" +
             "&current=$CURRENT&hourly=$HOURLY&daily=$DAILY&timezone=auto&forecast_days=$days" +
             (if (model.isNotBlank()) "&models=$model" else "")

@@ -101,12 +101,21 @@ fun SourcesScreen() {
         Group {
             Sources.keyed.forEachIndexed { i, src ->
                 if (i > 0) Divider()
-                SettingRow(src.name, if (s.apiKeys[src.id].isNullOrBlank()) "Chiave non inserita" else "Chiave salvata · in arrivo", Icons.Filled.Key) {
+                val has = !s.apiKeys[src.id].isNullOrBlank()
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(enabled = has) { pick(src.id) }.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = s.sourceId == src.id, onClick = { pick(src.id) }, enabled = has)
+                    Column(Modifier.weight(1f)) {
+                        Text(src.name, color = c.ink, fontSize = 15.sp)
+                        Text(if (has) "Chiave salvata" else "Inserisci la chiave per usarla", color = c.inkDim, fontSize = 13.sp)
+                    }
                     FilledTonalButton(onClick = { Nav.go(Screen.API_KEYS) }) { Text("Chiave", fontSize = 13.sp) }
                 }
             }
         }
-        Hint("Le fonti con chiave verranno attivate in una prossima versione: puoi già salvare la chiave.")
+        Hint("Salva la chiave e poi scegli la fonte. Ogni aggiornamento usa le richieste del tuo piano gratuito.")
 
         SectionTitle("Altri dati")
         Group {

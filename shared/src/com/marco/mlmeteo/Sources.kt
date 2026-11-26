@@ -36,7 +36,7 @@ object Sources {
         Source("gem", "GEM (Canada)", "GEM", "Mondo", SourceKind.OPEN_METEO, "gem_seamless"),
     )
 
-    /** Fonti che richiedono una chiave personale (arriveranno in una prossima versione). */
+    /** Fonti che richiedono una chiave personale (si attivano inserendo la chiave nelle impostazioni). */
     val keyed = listOf(
         Source("owm", "OpenWeatherMap", "OWM", "Richiede chiave API", SourceKind.API_KEY),
         Source("weatherapi", "WeatherAPI.com", "WeatherAPI", "Richiede chiave API", SourceKind.API_KEY),

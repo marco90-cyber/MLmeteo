@@ -75,7 +75,7 @@ object AppState {
             loading = true
             try {
                 val t0 = System.currentTimeMillis()
-                forecasts[p.id] = WeatherRepo.forecast(p, Sources.byId(settings.sourceId))
+                forecasts[p.id] = WeatherRepo.forecast(p, Sources.byId(settings.sourceId), settings.apiKeys)
                 errors.remove(p.id)
                 Log.d("Previsioni ${p.name} (${settings.sourceId}) in ${System.currentTimeMillis() - t0} ms")
                 saveForecastStamp()
