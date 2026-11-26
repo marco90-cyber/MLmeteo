@@ -1,7 +1,6 @@
 package com.marco.mlmeteo
 
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.readPixels
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
